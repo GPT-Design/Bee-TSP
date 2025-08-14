@@ -1,0 +1,54 @@
+# Global parameter file for Bee‑Swarm TSP (BSTSP).
+# Most values are safe starting points. Tune per instance size.
+# Paths
+paths:
+  tsplib_dir: "data/tsplib"
+  results_dir: "results"
+  instances_file: "benchmarks/instances.txt"
+
+# Solver knobs
+solver:
+  candidate:
+    k: 30                  # candidate edges per node (20 small, 40 large)
+    use_delaunay: true     # include Delaunay neighbors (Euclidean)
+    use_knn: true          # include k‑nearest neighbors
+    use_alpha_near: false  # add α‑nearness edges from Held–Karp 1‑tree (TODO)
+  zones:
+    method: "kmeans"       # or "graph_partition"
+    overlap_pct: 0.15      # 10–20% recommended
+    target_zone_size: 200  # aim zone size (50–300 typical)
+    agents_per_zone: 4
+  bees:
+    scout_fraction: 0.15
+    stagnation_moves: 300  # moves without improvement → kick/restart
+    levy_jump_prob: 0.10   # probability of a Lévy‑style medium hop on restart
+    max_improving_moves: 800
+    time_budget_s: 2.0     # soft cap per agent cycle
+  local_search:
+    use_lk: true
+    max_k: 5               # variable‑k limit (placeholder until LK implemented)
+    double_bridge: true
+    kick_period_moves: 300
+  integrator:
+    mode: "popmusic"       # or "eax"
+    merge_edge_cap_per_node: 12
+    parents_per_round: 10
+    rounds: 3
+  ehm:
+    smoothing_eps: 0.03
+    max_edges_per_node: 16
+  learning:
+    enabled: false
+    warmup_tours: 100
+    model: "gbdt"          # placeholder; choose "gbdt" or "gnn"
+    feature_set: ["distance","delaunay_adj","degree","alpha_nearness","pi_penalty"]
+  termination:
+    wall_time_s: 300
+    target_gap_pct: 0.5
+
+# Benchmark knobs
+benchmark:
+  runs: 30
+  threads: 8
+  ttt_thresholds_pct: [1.0, 0.5, 0.1]
+  seed_list: [0,1,2,3,4,5,6,7,8,9]
