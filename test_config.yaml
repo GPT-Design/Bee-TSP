@@ -1,0 +1,30 @@
+paths:
+  tsplib_dir: "data/tsplib"
+  results_dir: "results"
+  instances_file: "benchmarks/instances.txt"
+
+solver:
+  scouting:
+    dynamic:
+      enabled: true
+      no_improve_s: 2.0
+      max_restarts_per_seed: 2
+      sample:
+        temperature: 0.7
+        smooth_eps: 1.0
+      polish_time_s: 0.2
+  candidate:
+    k: 24
+    use_knn: true
+  zones:
+    agents_per_zone: 2
+  bees:
+    time_budget_s: 0.3
+  local_search:
+    kick_period_moves: 200
+  termination:
+    wall_time_s: 10.0
+
+benchmark:
+  runs: 1
+  seed_list: [42]

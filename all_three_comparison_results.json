@@ -1,0 +1,191 @@
+{
+  "configuration": {
+    "time_budget_s": 5.0,
+    "seeds": [
+      42
+    ],
+    "solver_config": {
+      "candidate": {
+        "k": 30,
+        "use_knn": true
+      },
+      "zones": {
+        "agents_per_zone": 4,
+        "adaptive_overlap": {
+          "enabled": true,
+          "portal_pct": 2.0
+        }
+      },
+      "bees": {
+        "time_budget_s": 1.2
+      },
+      "local_search": {
+        "kick_period_moves": 400,
+        "use_or_opt": true,
+        "stall_windows": 2,
+        "three_opt_lite": true,
+        "tri_budget": 1000
+      },
+      "scouting": {
+        "dynamic": {
+          "enabled": true,
+          "no_improve_s": 8.0,
+          "max_restarts_per_seed": 3,
+          "polish_time_s": 0.6
+        }
+      },
+      "termination": {
+        "wall_time_s": 5.0
+      },
+      "metric": {
+        "edge_weight_type": "EUC_2D"
+      }
+    },
+    "test_timestamp": "2025-08-24 19:57:52"
+  },
+  "results": [
+    {
+      "instance": "att48",
+      "n": 48,
+      "optimal_length": 10628,
+      "optimal_from_file": null,
+      "num_runs": 1,
+      "best_found": 10757.0,
+      "worst_found": 10757.0,
+      "median_length": 10757.0,
+      "mean_length": 10757.0,
+      "best_gap_pct": 1.2137749341362438,
+      "worst_gap_pct": 1.2137749341362438,
+      "median_gap_pct": 1.2137749341362438,
+      "mean_gap_pct": 1.2137749341362438,
+      "p10_gap_pct": 1.2137749341362438,
+      "p90_gap_pct": 1.2137749341362438,
+      "median_runtime": 5.048614263534546,
+      "mean_improvements": 5,
+      "parity": "OK",
+      "results": [
+        {
+          "seed": 42,
+          "length": 10757.0,
+          "gap_pct": 1.2137749341362438,
+          "runtime": 5.048614263534546,
+          "improvements": 5,
+          "anytime": [
+            [
+              0.15641355514526367,
+              11583.0
+            ],
+            [
+              0.21062135696411133,
+              11058.0
+            ],
+            [
+              0.3746800422668457,
+              10998.0
+            ],
+            [
+              1.002262830734253,
+              10903.0
+            ],
+            [
+              3.8779637813568115,
+              10757.0
+            ]
+          ]
+        }
+      ],
+      "ttt_opt_s": null,
+      "ttt_0.1pct_s": null
+    },
+    {
+      "instance": "kroA100",
+      "n": 100,
+      "optimal_length": 21282,
+      "optimal_from_file": 21282,
+      "num_runs": 1,
+      "best_found": 21915.0,
+      "worst_found": 21915.0,
+      "median_length": 21915.0,
+      "mean_length": 21915.0,
+      "best_gap_pct": 2.9743445164928106,
+      "worst_gap_pct": 2.9743445164928106,
+      "median_gap_pct": 2.9743445164928106,
+      "mean_gap_pct": 2.9743445164928106,
+      "p10_gap_pct": 2.9743445164928106,
+      "p90_gap_pct": 2.9743445164928106,
+      "median_runtime": 5.030822038650513,
+      "mean_improvements": 4,
+      "parity": "OK",
+      "results": [
+        {
+          "seed": 42,
+          "length": 21915.0,
+          "gap_pct": 2.9743445164928106,
+          "runtime": 5.030822038650513,
+          "improvements": 4,
+          "anytime": [
+            [
+              0.19022560119628906,
+              23093.0
+            ],
+            [
+              0.356842041015625,
+              22756.0
+            ],
+            [
+              0.814486026763916,
+              22402.0
+            ],
+            [
+              1.2801635265350342,
+              21915.0
+            ]
+          ]
+        }
+      ],
+      "ttt_opt_s": null,
+      "ttt_0.1pct_s": null
+    },
+    {
+      "instance": "ch130",
+      "n": 130,
+      "optimal_length": 6110,
+      "optimal_from_file": 6110,
+      "num_runs": 1,
+      "best_found": 6332.0,
+      "worst_found": 6332.0,
+      "median_length": 6332.0,
+      "mean_length": 6332.0,
+      "best_gap_pct": 3.6333878887070377,
+      "worst_gap_pct": 3.6333878887070377,
+      "median_gap_pct": 3.6333878887070377,
+      "mean_gap_pct": 3.6333878887070377,
+      "p10_gap_pct": 3.6333878887070377,
+      "p90_gap_pct": 3.6333878887070377,
+      "median_runtime": 5.1799187660217285,
+      "mean_improvements": 2,
+      "parity": "OK",
+      "results": [
+        {
+          "seed": 42,
+          "length": 6332.0,
+          "gap_pct": 3.6333878887070377,
+          "runtime": 5.1799187660217285,
+          "improvements": 2,
+          "anytime": [
+            [
+              0.3032970428466797,
+              6414.0
+            ],
+            [
+              1.0248866081237793,
+              6332.0
+            ]
+          ]
+        }
+      ],
+      "ttt_opt_s": null,
+      "ttt_0.1pct_s": null
+    }
+  ]
+}

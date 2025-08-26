@@ -1,0 +1,26 @@
+solver:
+  candidate:
+    k: 35
+    use_knn: true
+    use_delaunay: false
+  zones:
+    agents_per_zone: 6
+    overlap_pct: 0.0   
+    method: "kmeans"
+    target_zone_size: 999999  
+  bees:
+    time_budget_s: 1.5
+  local_search:
+    kick_period_moves: 500
+    use_or_opt: false
+  scouting:
+    dynamic:
+      enabled: true
+      no_improve_s: 10.0
+      max_restarts_per_seed: 4
+      polish_time_s: 0.8
+      sample:
+        temperature: 0.7
+        smooth_eps: 1.0
+  termination:
+    wall_time_s: 90

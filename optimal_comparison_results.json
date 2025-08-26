@@ -1,0 +1,97 @@
+{
+  "configuration": {
+    "time_budget_s": 10.0,
+    "seeds": [
+      42,
+      123
+    ],
+    "solver_config": {
+      "candidate": {
+        "k": 30,
+        "use_knn": true
+      },
+      "zones": {
+        "agents_per_zone": 4
+      },
+      "bees": {
+        "time_budget_s": 1.2
+      },
+      "local_search": {
+        "kick_period_moves": 400
+      },
+      "scouting": {
+        "dynamic": {
+          "enabled": true,
+          "no_improve_s": 8.0,
+          "max_restarts_per_seed": 3,
+          "polish_time_s": 0.6
+        }
+      },
+      "termination": {
+        "wall_time_s": 10.0
+      }
+    }
+  },
+  "results": [
+    {
+      "instance": "att48",
+      "optimal_length": 10628,
+      "num_runs": 2,
+      "best_found": 10818.0,
+      "worst_found": 10818.0,
+      "median_length": 10818.0,
+      "mean_length": 10818.0,
+      "best_gap_pct": 1.7877305231464058,
+      "worst_gap_pct": 1.7877305231464058,
+      "median_gap_pct": 1.7877305231464058,
+      "mean_gap_pct": 1.7877305231464058,
+      "median_runtime": 10.00002634525299,
+      "results": [
+        {
+          "seed": 42,
+          "length": 10818.0,
+          "gap_pct": 1.7877305231464058,
+          "runtime": 10.000022888183594,
+          "improvements": 7
+        },
+        {
+          "seed": 123,
+          "length": 10818.0,
+          "gap_pct": 1.7877305231464058,
+          "runtime": 10.000029802322388,
+          "improvements": 6
+        }
+      ]
+    },
+    {
+      "instance": "ch130",
+      "optimal_length": 6110,
+      "num_runs": 2,
+      "best_found": 6332.0,
+      "worst_found": 6332.0,
+      "median_length": 6332.0,
+      "mean_length": 6332.0,
+      "best_gap_pct": 3.6333878887070377,
+      "worst_gap_pct": 3.6333878887070377,
+      "median_gap_pct": 3.6333878887070377,
+      "mean_gap_pct": 3.6333878887070377,
+      "median_runtime": 10.00005555152893,
+      "results": [
+        {
+          "seed": 42,
+          "length": 6332.0,
+          "gap_pct": 3.6333878887070377,
+          "runtime": 10.000035524368286,
+          "improvements": 2
+        },
+        {
+          "seed": 123,
+          "length": 6332.0,
+          "gap_pct": 3.6333878887070377,
+          "runtime": 10.000075578689575,
+          "improvements": 3
+        }
+      ]
+    }
+  ]
+}
