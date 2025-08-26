@@ -1,0 +1,96 @@
+{
+  "configuration": {
+    "instance": "fnl4461",
+    "time_budget_s": 180.0,
+    "seeds": [
+      42
+    ],
+    "solver_config": {
+      "candidate": {
+        "k": 18,
+        "use_knn": true
+      },
+      "zones": {
+        "agents_per_zone": 4
+      },
+      "bees": {
+        "time_budget_s": 8.0
+      },
+      "local_search": {
+        "kick_period_moves": 400,
+        "use_or_opt": false
+      },
+      "scouting": {
+        "dynamic": {
+          "enabled": true,
+          "no_improve_s": 8.0,
+          "max_restarts_per_seed": 3,
+          "polish_time_s": 0.6
+        }
+      },
+      "termination": {
+        "wall_time_s": 180.0
+      },
+      "metric": {
+        "edge_weight_type": "EUC_2D"
+      }
+    },
+    "test_timestamp": "2025-08-24 22:34:23"
+  },
+  "results": [
+    {
+      "instance": "fnl4461",
+      "n": 4461,
+      "optimal_length": 182566,
+      "optimal_from_file": null,
+      "num_runs": 1,
+      "best_found": 252578.0,
+      "worst_found": 252578.0,
+      "median_length": 252578.0,
+      "mean_length": 252578.0,
+      "best_gap_pct": 38.348871093193694,
+      "worst_gap_pct": 38.348871093193694,
+      "median_gap_pct": 38.348871093193694,
+      "mean_gap_pct": 38.348871093193694,
+      "p10_gap_pct": 38.348871093193694,
+      "p90_gap_pct": 38.348871093193694,
+      "median_runtime": 180.19432830810547,
+      "mean_improvements": 5,
+      "parity": "OK",
+      "results": [
+        {
+          "seed": 42,
+          "length": 252578.0,
+          "gap_pct": 38.348871093193694,
+          "runtime": 180.19432830810547,
+          "improvements": 5,
+          "anytime": [
+            [
+              0.7946021556854248,
+              273994.0
+            ],
+            [
+              7.20871901512146,
+              264068.0
+            ],
+            [
+              17.468576669692993,
+              261398.0
+            ],
+            [
+              58.95281457901001,
+              254017.0
+            ],
+            [
+              69.82735013961792,
+              252578.0
+            ]
+          ]
+        }
+      ],
+      "ttt_0.1pct_s": null,
+      "ttt_0.5pct_s": null,
+      "ttt_1.0pct_s": null
+    }
+  ]
+}
