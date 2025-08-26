@@ -1,0 +1,231 @@
+﻿Appendix: Architecture & Benchmark Plan for the Bee‑Swarm TSP
+Scope. This appendix turns your Bee‑Swarm design—zone‑based agents with budgets, Lévy‑style hops, and a central integrator—into a reproducible algorithm with plug‑in components, parameters, and a benchmark protocol.
+________________
+
+
+A. Algorithm blueprint (drop‑in, hybridized)
+Core idea. Let many “bees” discover high‑quality local structure on a restricted candidate graph, then merge tours with a strong integrator, finishing with LKH‑grade local search. (This preserves your colony metaphor while matching modern TSP practice.)
+A1. Candidate graph (mandatory)
+* Build per‑node candidate set C(i)C(i) of size kk (typ. 20–40).
+
+* For Euclidean data: Delaunay neighbors ∪ k‑nearest neighbors.
+
+* Optional (recommended next): add α‑near edges from a 1‑tree lower‑bound (Held–Karp) pass as you implement it.
+
+A2. Bee agents (explorers)
+Each agent operates on a zone (with overlap) and a budget.
+   * Moves: 2‑opt/3‑opt improving moves restricted to C(⋅)C(\cdot).
+
+   * Kicks: periodic double‑bridge (ruin‑and‑recreate) to escape basins.
+
+   * Medium hops: Lévy‑like restarts when stagnating (use zone overlap to cross boundaries).
+
+   * Outputs: a complete (or partial) tour and its edge set.
+
+A3. Evidence model (colony memory)
+      * Maintain an Edge Histogram Matrix (EHM): frequency of edges seen in the top‑pp% tours.
+
+      * Scout sampling: generate new starts by sampling from EHM (with smoothing); immediately polish with local search.
+
+      * Information bonus: prefer edges with mid‑frequency (uncertain) to balance exploration vs exploitation.
+
+A4. Integrator (stitching)
+Two robust choices:
+         * POPMUSIC‑style tour merging: union the best edges from many tours into a sparse graph; run a final LKH pass on that graph.
+
+         * EAX crossover: combine pairs of good tours (edge‑assembly), then LKH‑polish the offspring.
+
+A5. Optional “learning waggle”
+            * Light model (e.g., gradient‑boosted trees) predicts edge usefulness from features (distance, Delaunay adjacency, node degrees, optional α‑scores). Use as a prior when sampling from C(⋅)C(\cdot).
+
+________________
+
+
+B. Formal scoring & energy
+B1. Dual‑gap energy (when HK is available)
+E(tour)  =  length(tour)  −  wHK(π),\mathcal{E}(\text{tour}) \;=\; \text{length}(\text{tour}) \;-\; w_{\text{HK}}(\pi),
+where wHK(π)w_{\text{HK}}(\pi) is the 1‑tree lower bound with node penalties π\pi.
+               * Policy: prioritize moves that reduce E\mathcal{E}.
+
+B2. Population entropy (for exploration)
+Let fef_e be the edge frequency in EHM. Define
+H  =  −∑e[felog⁡fe+(1−fe)log⁡(1−fe)].H \;=\; -\sum_e \big[f_e\log f_e + (1-f_e)\log(1-f_e)\big].
+                  * Edge score: score(e)=local gain(e)−λ Ie\text{score}(e) = \text{local gain}(e) - \lambda\,I_e with IeI_e the per‑edge entropy term. Tune λ\lambda.
+
+________________
+
+
+C. Zones & budgets (your design, made precise)
+C1. Zoning
+                     * Partition by k‑means on coordinates or by graph partitioning on the k‑NN distance graph.
+
+                     * Overlap halo: 10–20% of nodes around each zone to protect cross‑zone edges.
+
+                     * Targets: zone size 50–300 (scale with nn).
+
+C2. Budgets (agent caps)
+                        * Step budget: max improving moves or 2–5×∣zone∣|\text{zone}|.
+
+                        * Time budget: per‑agent soft cap (e.g., 0.5–5 s) before kick/restart.
+
+                        * Restart: Lévy‑style jump to a distant seed inside the overlap.
+
+________________
+
+
+D. Pseudocode (high‑level)
+Input: Coordinates/distances, n, params
+Build candidate sets C(i) for all i
+Zones ← PartitionNodes(n, overlap=τ)
+
+
+EHM ← empty
+BestPool ← ∅
+
+
+repeat until wall_time or target_gap:
+    parallel for zone in Zones:
+        for agent in 1..A_zone:
+            T ← ConstructInitialTour(zone, C)      # greedy + randomization
+            T ← LocalSearch_LK(T, C)               # variable-k-opt + kicks
+            BestPool ← UpdatePool(T)
+            EHM ← UpdateEdgeHistogram(T)
+            if stagnation:
+                T ← ScoutFromEHM(EHM, C)
+                T ← LocalSearch_LK(T, C)
+
+
+    # Integrator
+    G_sparse ← BuildSparseGraph(BestPool, EHM)
+    if mode = POPMUSIC: T_global ← MergeTours(G_sparse)
+    else:               T_global ← EAX_Combine(BestPool)
+    T_global ← LocalSearch_LK(T_global, C)
+    Best ← UpdateBest(T_global)
+
+
+return Best
+
+
+________________
+
+
+E. Parameters (sane defaults to start)
+                           * Candidate size kk: 30 (small nn: 20; large nn: 40).
+
+                           * Zone overlap τ\tau: 15%.
+
+                           * Agents per zone: 2–8 (depends on cores).
+
+                           * Kick period: every 200–400 improving moves (or 0.2 s).
+
+                           * Scout rate: 10–20% of agents per outer loop.
+
+                           * EHM smoothing ϵ\epsilon: 0.02–0.05.
+
+                           * Integrator:
+
+                              * POPMUSIC edge cap per node: 8–16.
+
+                              * EAX pairs per round: 5–20.
+
+                                 * Learning prior (optional): enable after a warm‑up (e.g., 100 tours).
+
+________________
+
+
+F. Benchmark protocol (publication‑ready)
+F1. Instance suite
+                                    * TSPLIB‑style Euclidean: e.g., eil51, ch130, kroA200, lin318, pcb442, rat783, pr1002, u1060, d1291, d2103, fl1577, rl11849, usa13509.
+
+                                    * Stress synthetics: rings, equidistant clusters, narrow corridors (to test your trap escapes).
+
+F2. Baselines
+                                       * LKH‑3 (default + lightly tuned).
+
+                                       * GA‑EAX (edge‑assembly) with local search.
+
+                                       * ACO (one solid modern variant).
+
+                                       * Optional: your learning‑guided variant vs non‑learning.
+
+F3. Metrics
+                                          * Gap to best‑known: (tour−best)/best(\text{tour}-\text{best})/\text{best} in %.
+
+                                          * Dual gap (if HK bound available).
+
+                                          * Anytime curves: best length vs time (median over 30 runs).
+
+                                          * Time‑to‑Target (TTT): time to reach 1%, 0.5%, 0.1% gaps.
+
+                                          * Robustness: median ± [10th, 90th] percentiles.
+
+F4. Ablations (flip one switch at a time)
+                                             * Candidate graph on/off (Delaunay / k‑NN / +α‑near).
+
+                                             * LK depth (2‑opt/3‑opt vs variable‑k + kicks).
+
+                                             * Integrator: POPMUSIC vs EAX.
+
+                                             * EHM scouts on/off; learning prior on/off.
+
+                                             * Zone overlap: 0%, 10%, 20%.
+
+F5. Reproducibility checklist
+                                                * Fixed seeds (list them).
+
+                                                * Hardware & threads; compiler flags.
+
+                                                * Instance sources and checksums.
+
+                                                * Parameter file committed with runs.
+
+                                                * Raw logs for anytime curves.
+
+________________
+
+
+G. Output & reporting templates
+G1. Table (per instance)
+Instance
+	Best Known
+	Bee Best
+	Gap %
+	Median Gap % [P10–P90]
+	TTT@1% (s)
+	TTT@0.5% (s)
+	Time Budget (s)
+	G2. Figures
+                                                   * Anytime plot (median best length vs time).
+
+                                                   * Ablation bars (gap % by module).
+
+                                                   * Zone overlay (diagnostic): show halo and cross‑zone edges for one large instance to verify boundary handling.
+
+________________
+
+
+H. Risks & mitigations (practical)
+                                                      * Zone boundary loss: use overlap + cross‑zone candidates; integrator must accept cross‑zone edges.
+
+                                                      * Over‑randomization: throttle Lévy hops by stagnation counters; retain last good tour as an anchor.
+
+                                                      * Memory in very large nn: cap EHM to top‑M edges per node (e.g., 16).
+
+                                                      * Parameter drift: schedule a simple bandit to allocate time across neighborhoods (2‑opt/3‑opt/k‑opt/EAX/merge).
+
+________________
+
+
+I. Minimal viable milestone (2‑week, single‑machine)
+                                                         1. Delaunay/kNN candidate graph → 2‑opt/3‑opt + kicks.
+
+                                                         2. Zones + 15% overlap; multiple agents; EHM scouts.
+
+                                                         3. Integrator: POPMUSIC merge → final LK pass.
+
+                                                         4. Run F1–F3 on 6–8 TSPLIB instances; publish tables/plots.
+
+________________
+
+
+If you’d like, I can also deliver a one‑page parameter file with these defaults (YAML/JSON) and a boilerplate README you can drop straight into the repo.
