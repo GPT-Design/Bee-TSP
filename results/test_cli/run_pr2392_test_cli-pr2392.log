@@ -1,6 +1,0 @@
-usage: run_auto_parallel.py [-h] [--config CONFIG] [--seeds SEEDS]
-                            [--workers WORKERS] [--tsplib_dir TSPLIB_DIR]
-                            [--results_dir RESULTS_DIR]
-                            [--wall_small WALL_SMALL]
-                            [--wall_large WALL_LARGE]
-run_auto_parallel.py: error: unrecognized arguments: 123 --tag test_cli-pr2392

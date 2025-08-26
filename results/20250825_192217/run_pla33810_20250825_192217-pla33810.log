@@ -1,8 +1,0 @@
-usage: test_all_three_instances.py [-h] [--time-budget TIME_BUDGET]
-                                   [--seeds [SEEDS ...]]
-                                   [--candidate-k CANDIDATE_K]
-                                   [--agent-time AGENT_TIME]
-                                   [--scouts-stagnation SCOUTS_STAGNATION]
-                                   [--max-restarts MAX_RESTARTS]
-                                   [--output OUTPUT] [--config CONFIG]
-test_all_three_instances.py: error: unrecognized arguments: --config_overlay configs/large_tune.yaml

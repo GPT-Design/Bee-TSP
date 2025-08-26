@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+.env/
+
+# Editors / IDE
+.vscode/
+.idea/
+.vs/
+
+# Tests / caches
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Runs & artifacts
+results/
+docs/reports/
+logs/
+*.log
+*_comparison_results*.json
+*_results.json
+*.log
+*.tmp
+
+# Data (keep only a README placeholder)
+data/tsplib/
+!data/tsplib/README.md
