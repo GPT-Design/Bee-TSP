@@ -1,0 +1,13 @@
+solver:
+  candidate:
+    use_delaunay: true
+    # k: override per instance via autoscaler or small per-inst YAMLs
+  zones:
+    agents_per_zone: 8
+  bees:
+    time_budget_s: 2.0
+  local_search:
+    use_or_opt: true
+    kick_period_moves: 400
+integrator:
+  method: "ucr"   # try A/B vs "popmusic"

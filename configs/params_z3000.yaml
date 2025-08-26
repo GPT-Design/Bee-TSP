@@ -1,0 +1,42 @@
+paths:
+  tsplib_dir: "data/tsplib"
+  results_dir: "results"
+  instances_file: "benchmarks/instances.txt"
+
+solver:
+  candidate: 
+    k: 24
+    use_knn: true
+    use_delaunay: true
+  features:
+    kd_backend: "auto"      # auto | sklearn | scipy | numpy
+    max_threads_per_lib: 1  # clamp BLAS/OpenMP during KD ops
+  local_search:
+    use_oropt: true
+    kick_period_moves: 420
+  bees:
+    time_budget_s: 1.5
+  scouting:
+    dynamic:
+      enabled: true
+      no_improve_s: 12
+      max_restarts_per_seed: 1
+  integrator:
+    method: "popmusic"   # keep default; we'll A/B "eax" later
+  ehm:
+    smoothing_eps: 0.03
+    max_edges_per_node: 16
+  learning:
+    enabled: false
+    warmup_tours: 100
+    model: "gbdt"
+    feature_set: ["distance","delaunay_adj","degree","alpha_nearness","pi_penalty"]
+  termination:
+    wall_time_s: 1800
+    target_gap_pct: 0.5
+
+benchmark:
+  runs: 5
+  threads: 1
+  ttt_thresholds_pct: [1.0, 0.5, 0.1]
+  seed_list: [0,1,2,3,4]

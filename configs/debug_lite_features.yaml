@@ -1,0 +1,35 @@
+solver:
+  candidate:
+    k: 24
+    use_knn: true
+  features:
+    kd_backend: "auto"      # SUSPECT: S·S·T features with normalization
+    max_threads_per_lib: 1
+  zones:
+    agents_per_zone: 4
+    adaptive_overlap:
+      enabled: false        # DISABLED: Test if adaptive overlap causes issue
+      portal_pct: 2.0
+  bees:
+    time_budget_s: 1.0
+  local_search:
+    kick_period_moves: 400
+    use_or_opt: true        # RE-ENABLED: Test if Or-opt fix works
+    stall_windows: 2
+    three_opt_lite: false   # DISABLED: Test if 3-opt causes issue
+    tri_budget: 1000
+  scouting:
+    dynamic:
+      enabled: true
+      no_improve_s: 8.0
+      max_restarts_per_seed: 3
+      polish_time_s: 0.6
+  termination:
+    wall_time_s: 30.0
+
+integrator:
+  method: "popmusic"        # DISABLED: Test if UCR causes issue
+  ucr:
+    parents: 4
+    children_per_pair: 1
+    repair_budget_ms: 30
