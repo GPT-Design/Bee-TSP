@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-import argparse, os, time, json
+import argparse, os, time, json, sys
 from pathlib import Path
+
+# Make project root importable even if you run this from scripts/
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 try:
-    import yaml
+    import yaml  # pip install pyyaml
 except Exception:
     yaml = None
 
@@ -34,7 +40,6 @@ def run_once(solver, instance_name, instance_path, out_dir, seed=0):
     ensure_dir(out_dir)
     log_path = Path(out_dir) / f"seed_{seed}.jsonl"
     with open(log_path, 'w') as w:
-        # anytime trace
         for t, best in result.get("anytime", []):
             w.write(json.dumps({"event":"improve","t":float(t),"best":float(best)}) + "\n")
         w.write(json.dumps({"event":"summary","seed":seed,"best":float(result.get("best_length", 0.0)),"runtime":runtime}) + "\n")
@@ -42,16 +47,21 @@ def run_once(solver, instance_name, instance_path, out_dir, seed=0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--config', required=True)
+    ap.add_argument('--config', required=True, help='Path to YAML config (configs/params.yaml)')
     args = ap.parse_args()
     cfg = load_config(args.config)
-    solver = BeeTSPSolver(cfg['solver'])
 
-    instances = load_instances(cfg['paths']['instances_file'], cfg['paths']['tsplib_dir'])
+    paths = cfg['paths']
+    solver_cfg = cfg['solver']
+    bench = cfg['benchmark']
+
+    instances = load_instances(paths['instances_file'], paths['tsplib_dir'])
+    solver = BeeTSPSolver(solver_cfg)
+
     for name, path in instances:
         print(f"[INFO] Instance: {name} -> {path}")
-        out_dir = Path(cfg['paths']['results_dir']) / f"bstsp/{name}"
-        for seed in cfg['benchmark'].get('seed_list', [0]):
+        out_dir = Path(paths['results_dir']) / f"bstsp/{name}"
+        for seed in bench.get('seed_list', [0]):
             res, rt, log = run_once(solver, name, path, out_dir, seed=seed)
             print(f"  seed={seed}  best={res.get('best_length', 0.0):.1f}  runtime={rt:.2f}s  log={log}")
 
