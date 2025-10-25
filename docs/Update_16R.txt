@@ -1,0 +1,96 @@
+Update_16R.txt
+Title: Short-Wall Policy + Multi-Hive Post-Mortem (Revised)
+Version: 2025-09-07
+Supersedes: Update_16.txt (archive as Update_16_preMH.txt)
+Depends on: Priority_Update_1 + Update_15 (TSPLIB-integer single source of truth)
+
+0) Summary (what changed)
+- Keep **Single-Hive (SH) Large-N** as default for short walls (≤30 min).
+- **Disable MH-Full** at short walls; add **MH-Lite** (H1/H3 only) as *opt-in experiment*.
+- **Late-only Or-opt** with portal protection; no early global relocations.
+- Boundary discipline: small halos, **portals-only** crossings, tight per-node edge caps.
+- Merge cadence: **POPMUSIC only at mid & end** (no per-epoch merges).
+
+1) Defaults (short-wall runs: pr2392@600 s, fnl4461@1800 s)
+- Preset: SH Large-N = Delaunay ∪ k-NN, k = k_base+4; POPMUSIC; 4 agents/zone; Or-opt OFF; workers=1; threads=1.
+- Controller: **re-sum every tour via TSPLIB integer**; that integer drives champion, rewards, allocator Δgap/sec, bounds, TTT, logs.
+- Parity triad once; abort if .opt.tour exists and parity ≠ OK.
+
+2) MH-Lite (experimental; OFF by default)
+Goal: retain some diversity without short-wall coordination churn.
+- Hives: **H1 (Δk=0)**, **H3 (Δk=+4)** only.
+- Epoch: **120 s**; **min_slice**: **60 s** (no realloc faster than epoch).
+- Allocator: **UCB1** on controller-integer Δgap/sec; ignore micro-deltas (improve_eps_pct ≥ 0.2%).
+- Integrator cadence: POPMUSIC merges at **T=½ wall** and **T=wall** only.
+- Bee-Ball: gated; require ring score high **and** dual-gap stall ≥ **2 epochs**; strict time-box.
+- Shared: champion (read-only to miners), global EHM, **portals** (top cross-zone connectors).
+- Or-opt: OFF unless time_frac ≥ 0.8 (see §4).
+
+3) Boundary & candidates (for SH and MH-Lite)
+- Halo: **10–15%**. Avoid >20%.
+- Cross-zone: **portals-only** (small fixed budget per node).
+- Per-node edge cap: **5–10** in union/candidate graph.
+- Δk profiles **must not invent far edges**; widen locally only.
+
+4) Or-opt timing (late-only + protection)
+- 0–50% wall: **FORBID** Or-opt.
+- 50–80%: **ALLOW intra-zone only**, protect portal edges.
+- ≥80%: **ONE global pass**, require integer gain τ ≥ 3–5; never remove protected portals unless time_frac ≥ 0.8 and τ met.
+
+5) Logging & diagnostics (per epoch)
+- Time breakdown: {local_search, merge, allocator, idle}.
+- Cross-zone edge % in champion (+Δ).
+- Portal removals pre-80% (count; ΔL_int at removal).
+- Or-opt survival % (edges changed by Or-opt that survive to final).
+- Candidate degree histogram near halos (cap violations).
+- Dual-gap (HK) series; stall flags; merge events {mid,end}; allocator decisions.
+
+6) Experiments to (re)run under 16R
+A/B (primary, median over seeds 42/123/456):
+- pr2392 @600 s: **SH vs MH-Lite**.
+- fnl4461 @1800 s: **SH vs MH-Lite**.
+Ablations (pr2392 @600 s unless noted):
+- A1) SH: k_base vs k_base+4.
+- A2) MH-Lite: epoch 60 vs 120 (min_slice=60).
+- A3) MH-Lite: merges {each_epoch} vs {mid,end}.
+- A4) MH-Lite: Bee-Ball ON vs OFF.
+
+Capture for each: **TTT@10%** (primary), TTT@5% (if hit), final gap @ wall, early anytime slope (0–10 min), improvements/min, hive attribution, dual-gap timeline. Emit `.tour` + SHA256 + manifest JSONL.
+
+7) Promotion gates (MH-Lite remains OFF unless all hold, medians over seeds)
+- pr2392@600 s: TTT@10% ≤ SH, **or** same TTT with early slope ≥ SH and final gap ≤ SH +1%.
+- fnl4461@1800 s: final gap ≤ SH +1% and early slope ≥ SH −0.5%.
+
+8) Rollback / safety
+- Any synthetic evaluator call, parity FAIL on .opt, or allocator fed non-integer deltas ⇒ **disable MH-Lite immediately** and rerun SH baselines.
+
+9) YAML knobs (reference)
+solver:
+  candidate: { use_knn: true, use_delaunay: true }     # Delaunay ∪ k-NN
+  zones: { agents_per_zone: 4 }
+  local_search: { use_oropt: false }                   # late-only via controller gate
+  traps:
+    bee_ball: { enabled: true, stall_epochs: 2, halo_pct: 0.10, timebox_s: 10 }
+
+  multi_hive:
+    enabled: false
+    profile: "lite"
+    epoch_s: 120
+    min_slice_s: 60
+    hives: [H1, H3]
+    profiles:
+      H1: { delta_k: 0, bias: none, bee_ball_boost: 0.0 }
+      H3: { delta_k: 4, bias: none, bee_ball_boost: 0.0 }
+    allocator: { method: ucb1, improve_eps_pct: 0.2 }
+
+  integrator:
+    merge_schedule: ["mid","end"]   # overrides per-epoch merges when profile=lite
+
+10) Artifacts (unchanged)
+- Required per accepted run: `.tour` (1-based TSPLIB), **SHA256**, run JSON, logs, **manifest.jsonl** line:
+  {instance, metric, mode, wall_s, seed, tour_path, tour_sha256,
+   length_tsplib, opt, best_known, parity, ttt10_s, ttt5_s, early_slope,
+   improvements_per_min, hive_attrib, timestamp_utc}
+- Parity triad printed once/run. TTT rule: hit when `best_int ≤ floor(opt*(1+ε/100))`.
+
+End of file.

@@ -1,0 +1,305 @@
+Here’s a tight, copy-pasteable action plan for Claude Code. Drop this into a file like `CC_ACTION_PLAN_BEE_TSP.md` and let CC execute it.
+
+---
+
+# CC Action Plan — Bee-TSP (Appendix Track)
+
+## 0) Goals (why now)
+
+* Freeze **small/mid** defaults to avoid regressions.
+* Implement **Appendix items** with highest ROI: `features.py` (S·S·T), `autoscaler_v2`, **adaptive overlap + portals**, **3-opt on stall**, and **EAX (A/B vs POPMUSIC)**.
+* Update harness to support `op.tour_available` and emit **TTT\@opt**.
+
+---
+
+## 1) Freeze small/mid baseline (no more micro-tuning)
+
+**Files:** `configs/params_z3000.yaml` (or equivalent)
+
+```yaml
+solver:
+  candidate: { k: 24, use_knn: true, use_delaunay: true }
+  local_search:
+    use_oropt: true
+    kick_period_moves: 420
+  bees: { time_budget_s: 1.5 }
+  scouting:
+    dynamic:
+      enabled: true
+      no_improve_s: 12
+      max_restarts_per_seed: 1
+integrator:
+  method: "popmusic"   # keep default; we'll A/B "eax" later
+```
+
+**Do not change** these defaults elsewhere.
+
+---
+
+## 2) Implement S·S·T features and autoscaler v2
+
+### 2.1 `bee_tsp/features.py` (new)
+
+```python
+# bee_tsp/features.py
+import numpy as np
+from sklearn.neighbors import KDTree
+
+def compute_features(coords):
+    # coords: (n,2) ndarray (assume pre-normalized is OK; if not, center & RMS-scale)
+    n = coords.shape[0]
+    # bbox & area
+    xmin, ymin = coords.min(axis=0); xmax, ymax = coords.max(axis=0)
+    A = max((xmax - xmin) * (ymax - ymin), 1e-9)
+
+    # 1-NN scale (exclude self)
+    kdt = KDTree(coords)
+    d, _ = kdt.query(coords, k=2)
+    r1 = d[:,1].mean()
+
+    # density index (~1 uniform; <1 clustered; >1 diffuse)
+    delta = 2.0 * r1 * np.sqrt(n / A)
+
+    # PCA anisotropy
+    X = coords - coords.mean(axis=0)
+    S = np.cov(X.T)
+    evals = np.linalg.eigvalsh(S)
+    lam_min = max(evals[0], 1e-12)
+    anisotropy = float(evals[-1] / lam_min)
+
+    # convex hull fraction
+    try:
+        from scipy.spatial import ConvexHull
+        hull_frac = len(ConvexHull(coords).vertices) / float(n)
+    except Exception:
+        hull_frac = 0.0
+
+    # cheap cluster score via k-NN modularity proxy
+    # build 10-NN graph and measure average neighbor distance vs global mean
+    d10, _ = kdt.query(coords, k=min(11, n))
+    local_mean = d10[:,1:].mean(axis=1).mean()
+    cluster_score = max(0.0, min(1.0, float((r1 - local_mean) / max(r1, 1e-9))))  # crude ∈[0,1]
+
+    return {
+        "n": int(n),
+        "area": float(A),
+        "r1_mean": float(r1),
+        "density_idx": float(delta),
+        "anisotropy": float(anisotropy),
+        "hull_frac": float(hull_frac),
+        "cluster_score": float(cluster_score),
+    }
+```
+
+### 2.2 `bee_tsp/auto_params.py` — add `autoscale_v2(base_cfg, feats)`
+
+```python
+# bee_tsp/auto_params.py
+def autoscale_v2(base, feats):
+    cfg = dict(base)  # shallow copy is OK for our keys
+    n = feats["n"]; delta = feats["density_idx"]; a = feats["anisotropy"]
+    h = feats["hull_frac"]; C = feats["cluster_score"]
+
+    # size tiers (keep v1 logic, then apply deltas)
+    if n <= 6000:    k, zone, ov, agents, bee = 36, None, 0.0, 6, 0.8
+    elif n <= 10000: k, zone, ov, agents, bee = 28, 3000, 0.005, 4, 0.6
+    elif n <= 30000: k, zone, ov, agents, bee = 26, 3000, 0.005, 4, 0.6
+    elif n <= 60000: k, zone, ov, agents, bee = 26, 3000, 0.004, 4, 0.6  # new band (e.g., pla33810)
+    else:            k, zone, ov, agents, bee = 24, 3000, 0.003, 3, 0.5
+
+    # sparsity/topology deltas
+    if delta < 0.9:                 # clustered
+        k += 6; ov += 0.003
+        if zone: zone = min(zone, 2500)
+        cfg.setdefault("solver", {}).setdefault("routing", {})["cfrs"] = True
+    if delta > 1.3:                 # diffuse/outliers
+        k -= 4; ov = max(ov - 0.002, 0.0)
+    if a > 8.0:                     # corridor
+        k += 2
+        cfg.setdefault("solver", {}).setdefault("zones", {})["stripe_partitions"] = True
+    if h > 0.25:                    # ring/perimeter
+        ov += 0.002
+        cfg.setdefault("solver", {}).setdefault("traps", {})["bee_balls"] = True
+        cfg["solver"].setdefault("candidate", {})["alpha_near_cross"] = 1.5
+    if C > 0.35:                    # strong clusters
+        cfg.setdefault("solver", {}).setdefault("routing", {})["cfrs"] = True
+
+    # apply back
+    sol = cfg.setdefault("solver", {})
+    cand = sol.setdefault("candidate", {})
+    cand["k"] = max(18, int(k))
+    z = sol.setdefault("zones", {})
+    z["target_zone_size"] = zone or 999999
+    z["overlap_pct"] = float(min(ov, 0.01))
+    z["agents_per_zone"] = agents
+    sol.setdefault("bees", {})["time_budget_s"] = bee
+    # always ensure delaunay + knn on small/mid
+    cand.setdefault("use_knn", True)
+    if n <= 6000: cand["use_delaunay"] = True
+    return cfg
+```
+
+---
+
+## 3) Adaptive overlap + portal nodes (zone boundary quality)
+
+**Where:** in your zoning/partition routine (where overlap gets applied)
+
+**Algorithm:**
+
+* Compute `ring_w = scale * mean(r_k)` with `k≈10` (mean 10-NN distance).
+* Set overlap halo as: `halo_pct = min(0.01, ring_w / sqrt(area))`. If user set `overlap_pct`, take `max(user, halo_pct)`.
+* **Portal nodes per zone:** score each boundary node by `(external_kNN_degree + EHM_edge_count)` and keep top `p%` (start `p=2`). Force-include these portals in both adjacent zones’ candidate sets.
+
+**Config keys (add):**
+
+```yaml
+solver:
+  zones:
+    adaptive_overlap: { enabled: true, ring_scale: 1.0, portal_pct: 2.0 }
+```
+
+---
+
+## 4) 3-opt on stall (bounded, candidate-triangle)
+
+**File:** `bee_tsp/solver.py` (outer local-search loop)
+
+```python
+stall_windows = 0
+if improved: stall_windows = 0
+else: stall_windows += 1
+
+# when no improvement for 2 windows, try a bounded 3-opt
+if stall_windows >= 2:
+    improved |= three_opt_candidates(
+        tour, dist, candidate_adj, tri_budget=5000  # cap triangles
+    )
+    stall_windows = 0
+```
+
+**Add stub:**
+
+```python
+def three_opt_candidates(tour, dist, cand_adj, tri_budget=5000):
+    # enumerate 3-edge sets where (i,j), (k,l), (m,n) are in candidate adjacency
+    # try classic reconnections; accept-improve; stop at budget
+    ...
+```
+
+---
+
+## 5) EAX integrator (A/B vs POPMUSIC)
+
+**Config:**
+
+```yaml
+integrator:
+  method: "popmusic"     # switch to "eax" for A/B test
+  eax:
+    parents: 8
+    children_per_pair: 2
+    repair_budget_ms: 50
+```
+
+**Skeleton:** `bee_tsp/integrators/eax.py`
+
+```python
+def eax_recombine(parentA, parentB, candidate_union, repair_budget_ms):
+    # 1) U = edges(A) ∪ edges(B); D = symmetric difference cycles (E-sets)
+    # 2) Select E-sets; flip to build child
+    # 3) Repair with bounded 2-opt on candidate_union (time budget)
+    # 4) Return best child
+    ...
+```
+
+**Hook:** in solver’s integrator switch, call EAX when configured; always finish with a short polish (2-opt / Or-opt).
+
+---
+
+## 6) Harness updates for `op.tour_available`
+
+**Files:** test harness (e.g., `tests/test_all_three_instances.py`) and CSV loader.
+
+* Extend `best_known.csv` schema to: `instance,best_known,op.tour_available`.
+* Parse `op.tour_available` (`Y`/`N`).
+* If `Y` and an `.opt.tour` path exists, **also compute** `TTT@opt` (first timestamp achieving tour length == opt).
+* Else, keep `TTT@{1.0,0.5,0.1}%`.
+
+**Pseudocode snippet:**
+
+```python
+has_opt = row.op_tour_available.upper() == 'Y'
+opt_path = find_opt_path(instance)  # e.g., <tsplib_dir>/<instance>.opt.tour
+if has_opt and os.path.exists(opt_path):
+    targets = [(0.0, "TTT@opt"), (0.1, "TTT@0.1%")]
+else:
+    targets = [(1.0, "TTT@1%"), (0.5, "TTT@0.5%"), (0.1, "TTT@0.1%")]
+```
+
+---
+
+## 7) Acceptance gates (expanded suite)
+
+Use the user’s updated table:
+
+* **att48 (Y):** ≥80% seeds hit **opt** in 60s; median **TTT\@opt ≤ 20s**.
+* **eil101 (Y):** **TTT\@opt ≤ 45s** median.
+* **kroA100 (Y):** **TTT\@opt ≤ 40s** median.
+* **ch130 (Y):** **TTT\@opt ≤ 60s** median.
+* **gr137 (N):** median gap ≤ 0.35% @ 180s; **TTT\@0.5% ≤ 60s**.
+* **pr2392 (Y):** median gap ≤ 0.6% @ 1800s; **TTT\@1% ≤ 120s**; if opt present, also emit **TTT\@opt**.
+* **fnl4461 (N):** median gap ≤ 0.8% @ 1800s; **TTT\@1% ≤ 60s**.
+* **pla7397 (N):** median gap ≤ 0.25% @ 1800s; **TTT\@0.5% ≤ 8 min**.
+* **pla33810 (Y):** median gap ≤ 0.12% @ 3600s; **TTT\@0.1% ≤ 30 min**; if opt parsed, also **TTT\@opt**.
+* **pla85900 (N):** median gap ≤ 0.08% @ 7200s; **TTT\@0.1% ≤ 70 min**.
+
+**Ablations (prove value):** `--no-scouts`, `integrator=popmusic vs eax`, `--no-autoscaler-v2`, `--no-adaptive-overlap`. Expect worse TTT/gaps (Wilcoxon p<0.05).
+
+---
+
+## 8) Commands (reference)
+
+**Small/Mid sanity:**
+
+```bash
+python tests/test_all_three_instances.py \
+  --config configs/params_z3000.yaml \
+  --time-budget 90 --seeds 42 123 456 789 999
+```
+
+**Large mix (parallel seeds):**
+
+```bash
+# Prevent thread oversubscription for each worker
+set OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1  # (Windows PowerShell adapt accordingly)
+
+python scripts/run_auto_parallel.py --config configs/params_z3000.yaml \
+  --tsplib_dir data/tsplib --results_dir results \
+  --seeds 8 --workers 4 --wall_small 1800 --wall_large 7200
+
+.\analyze_large3.ps1 -Root results\bstsp_large3 -BestCsv benchmarks\best_known.csv \
+  -OutCsv results\summary\large3_summary.csv
+```
+
+---
+
+## 9) Guardrails
+
+* Keep current **small/mid defaults** as above.
+* All new features are **opt-in via config** (autoscaler v2 invoked by runner after computing features).
+* Maintain backward compatibility: if `features.py` or `autoscale_v2` not called, behavior matches v1.
+
+---
+
+**Deliverables for CC:**
+
+1. `bee_tsp/features.py` (as above).
+2. `bee_tsp/auto_params.py` updated with `autoscale_v2`.
+3. Zoning code updated for **adaptive overlap + portals**.
+4. `three_opt_candidates(...)` and stall hook in `solver.py`.
+5. `bee_tsp/integrators/eax.py` + integrator switch.
+6. Harness CSV loader + TTT logic updated to support `op.tour_available` and `TTT@opt`.
+7. Keep `configs/params_z3000.yaml` exactly as in §1.
+
+---

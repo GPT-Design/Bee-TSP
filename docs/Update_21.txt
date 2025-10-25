@@ -1,0 +1,156 @@
+Update_21.txt
+
+1) Quick sanity check (what the manifest actually has)
+# tools/peek_manifest.py
+import json
+from pathlib import Path
+m = Path(r"results/manifest.jsonl")
+rows = [json.loads(x) for x in m.read_text().splitlines() if x.strip()]
+print(f"[manifest] {len(rows)} lines")
+# Show the last few
+for r in rows[-6:]:
+    print({k:r.get(k) for k in ["instance","mode","wall_s","seed","length_tsplib","tour_path"]})
+# Group count by (instance, wall, mode)
+from collections import Counter
+cnt = Counter((r.get("instance"), r.get("wall_s"), r.get("mode")) for r in rows)
+print("\n[group counts]")
+for k,v in sorted(cnt.items()):
+    print(v, k)
+
+
+Run:
+
+python tools/peek_manifest.py
+
+
+If you don’t see rows for:
+
+(pla33810, 3600, SH) and
+
+(pla33810, 5400, SH)
+then those runs didn’t append to the manifest (fix output_app.py usage or rerun).
+
+2) Slightly tougher aggregator (path-agnostic, Windows-friendly)
+
+This version is the same as before but:
+
+takes the manifest path as an argument,
+
+handles Windows paths cleanly,
+
+optionally falls back to reading the run’s <base>.json if wall_s (or other fields) were missing (shouldn’t happen under Update 20, but nice to have).
+
+#!/usr/bin/env python3
+# tools/aggregate_ab_tables.py
+import json, csv, statistics as stats
+from pathlib import Path
+import argparse
+
+INSTANCES = {"pla33810": {3600,5400}, "pr2392": {600,900}, "fnl4461": {1800}}
+MODES = {"SH","MH-Lite"}
+
+def pctl(vals, q):
+    if not vals: return None
+    s = sorted(vals); k = (len(s)-1)*q/100
+    i = int(k); d = k - i
+    return s[i]*(1-d)+s[i+1]*d if i+1 < len(s) else s[i]
+
+def read_manifest(path):
+    for line in Path(path).read_text().splitlines():
+        if line.strip(): yield json.loads(line)
+
+def backfill_from_run_json(rec):
+    # Optional: try to read the run summary JSON if something is missing
+    tp = Path(rec.get("tour_path",""))
+    if not tp.exists(): return rec
+    run_json = tp.with_suffix(".json")
+    if run_json.exists():
+        try:
+            j = json.loads(run_json.read_text())
+            for k in ["wall_s","elapsed_s","epochs_completed","epoch_s","mode","instance"]:
+                rec.setdefault(k, j.get(k))
+        except Exception:
+            pass
+    return rec
+
+def collect(records):
+    by_group = {}   # (instance, wall_s, mode) -> list[rec]
+    per_seed = []   # flat rows
+    for r in records:
+        r = backfill_from_run_json(r)
+        inst = r.get("instance"); wall = r.get("wall_s"); mode = r.get("mode")
+        seed = r.get("seed"); length = r.get("length_tsplib")
+        if inst not in INSTANCES or wall not in INSTANCES[inst] or mode not in MODES:
+            continue
+        key = (inst, wall, mode)
+        by_group.setdefault(key, []).append(r)
+        per_seed.append({
+            "instance": inst, "wall_s": wall, "seed": seed, "mode": mode,
+            "best_len_int": length,
+            "ttt10_s": r.get("ttt10_s"), "ttt5_s": r.get("ttt5_s"),
+            "early_slope": r.get("early_slope"),
+            "improvements_per_min": r.get("improvements_per_min"),
+            "hive_attrib": r.get("hive_attrib"), "parity": r.get("parity")
+        })
+    return by_group, per_seed
+
+def median_safe(vals):
+    vals = [v for v in vals if v is not None]
+    return stats.median(vals) if vals else None
+
+def write_master(by_group, out_csv):
+    hdr = ["instance","wall_s","mode","best_len_med","best_len_p10","best_len_p90",
+           "ttt10_s_med","ttt5_s_med","early_slope_med","improvements_per_min_med","n_runs"]
+    rows=[]
+    for (inst, wall, mode), recs in sorted(by_group.items()):
+        if not recs: continue
+        L   = [r.get("length_tsplib") for r in recs if r.get("length_tsplib") is not None]
+        t10 = [r.get("ttt10_s")       for r in recs if r.get("ttt10_s")       is not None]
+        t05 = [r.get("ttt5_s")        for r in recs if r.get("ttt5_s")        is not None]
+        es  = [r.get("early_slope")   for r in recs if r.get("early_slope")   is not None]
+        ipm = [r.get("improvements_per_min") for r in recs if r.get("improvements_per_min") is not None]
+        rows.append({
+            "instance": inst, "wall_s": wall, "mode": mode,
+            "best_len_med": median_safe(L),
+            "best_len_p10": pctl(L,10), "best_len_p90": pctl(L,90),
+            "ttt10_s_med": median_safe(t10), "ttt5_s_med": median_safe(t05),
+            "early_slope_med": median_safe(es),
+            "improvements_per_min_med": median_safe(ipm),
+            "n_runs": len(recs)
+        })
+    Path(out_csv).write_text("")  # ensure file exists even if no rows
+    with open(out_csv, "w", newline="") as f:
+        w=csv.DictWriter(f, fieldnames=hdr); w.writeheader(); w.writerows(rows)
+
+def write_per_seed(per_seed, out_csv):
+    hdr = ["instance","wall_s","seed","mode","best_len_int","ttt10_s","ttt5_s",
+           "early_slope","improvements_per_min","hive_attrib","parity"]
+    with open(out_csv, "w", newline="") as f:
+        w=csv.DictWriter(f, fieldnames=hdr); w.writeheader(); w.writerows(per_seed)
+
+if __name__=="__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--manifest", default=r"results/manifest.jsonl")
+    ap.add_argument("--out-master", default=r"results/ab_master.csv")
+    ap.add_argument("--out-per-seed", default=r"results/ab_per_seed.csv")
+    args = ap.parse_args()
+
+    records = list(read_manifest(args.manifest))
+    by_group, per_seed = collect(records)
+    Path("results").mkdir(exist_ok=True)
+    write_master(by_group, args.out_master)
+    write_per_seed(per_seed, args.out_per_seed)
+    print("[aggregate] wrote", args.out_master, "and", args.out_per_seed)
+
+
+Run:
+
+python tools/aggregate_ab_tables.py --manifest results\manifest.jsonl
+
+If you still get empty rows
+
+Open results\manifest.jsonl and confirm each SH run actually appended a line with:
+
+instance="pla33810", mode="SH", wall_s=3600 or 5400, seed (per seed), and length_tsplib.
+
+If those fields are present, the aggregator will pick them up immediately—your directory names already match Update 20, so nothing else needs changing.

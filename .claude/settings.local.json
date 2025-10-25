@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test:*)",
+      "Bash(python:*)",
+      "Bash(export STRICT_TSPLIB_EVAL=1)",
+      "Bash(export:*)",
+      "Read(//f/f/PYTHON/Bee-TSP_test/**)",
+      "Bash(cat:*)",
+      "Bash(xargs ls:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

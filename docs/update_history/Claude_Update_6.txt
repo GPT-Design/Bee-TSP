@@ -1,0 +1,86 @@
+Claude_Update_6.txt — Metric Parity & Harness Guard
+Goals
+
+Ensure harness computes tour lengths with the exact same metric & rounding as the solver.
+
+Hard-fail (or warn) if any run reports best < best_known when an opt tour exists.
+
+1) metrics.py — expose a single source of truth
+
+Add a tiny API the harness can reuse:
+
+# bee_tsp/metrics.py
+from typing import Callable
+
+def build_eval_fn(cfg, ins) -> Callable[[list[int]], int]:
+    """
+    Returns eval_tour(tour) that sums edge costs using the same dist + integer
+    rounding as the solver. 'tour' is a node index sequence (0-based or your internal).
+    """
+    cost = build_cost_fn(cfg, ins)
+    integer = bool((cfg.get("metric") or {}).get("integer", True))
+    dist = wrap_dist(cost, integer=integer)
+
+    def eval_tour(tour):
+        s = 0
+        n = len(tour)
+        for i in range(n):
+            s += dist(tour[i], tour[(i+1) % n])
+        return int(s)
+    return eval_tour
+
+
+(You already have build_cost_fn and wrap_dist; this just packages a safe eval_tour for external use.)
+
+2) Solver → write metric tag to resolved params (optional but helpful)
+
+When starting a run, log/export:
+
+metric_tag = ins.edge_weight_type  # e.g., EUC_2D/ATT/GEO
+cfg_here.setdefault("metric", {})["edge_weight_type"] = metric_tag
+# and write to resolved_params.yaml like you already do
+
+3) Harness — use the same eval function
+
+In your test harness:
+
+from bee_tsp.tsplib import load_tsplib
+from bee_tsp.metrics import build_eval_fn
+
+ins = load_tsplib(instance_path)
+eval_tour = build_eval_fn(cfg_from_yaml_or_resolved, ins)
+
+# when computing best_overall/median/ttt, evaluate tours with eval_tour(...)
+best_len = eval_tour(best_tour_sequence)
+
+4) Guardrail: detect impossible “negative gap”
+
+Right after computing best_overall:
+
+if row.op_tour_available.upper() == 'Y' and best_overall < best_known:
+    print(f"[WARN] METRIC_MISMATCH? best({best_overall}) < best_known({best_known}) for {instance}")
+    # Optionally: set a flag in the summary: parity="FAIL"
+
+5) Quick parity checks (scripts you already have)
+
+Run these once per instance when adding to the suite:
+
+python scripts/verify_edge_type.py --tsp data\tsplib\att48.tsp --tour data\tsplib\att48.opt.tour
+python scripts/verify_edge_pairs.py --tsp data\tsplib\att48.tsp --pairs 10000
+
+6) Config sanity (small/mid defaults)
+
+Keep:
+
+solver:
+  metric: { type: tsplib, integer: true }   # use EDGE_WEIGHT_TYPE; integer rounding on
+
+7) Acceptance for Update 6
+
+att48/kroA100/ch130: no negative gaps; if opt exists, TTT@opt is sensible.
+
+Summary includes a simple parity=OK/FAIL field per instance.
+
+Backend choice (sklearn/scipy/numpy) doesn’t change results (already true).
+
+If you want, I can also give you the minimal ATT/EUC/GEO rounding snippets, but since your solver already matches TSPLIB (you verified this earlier), the key is just: make the harness call the solver’s eval.

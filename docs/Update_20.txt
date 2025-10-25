@@ -1,0 +1,140 @@
+Update_20.txt
+Title: Standardized Output System (directories, filenames, manifests, CI hooks)
+Version: 2025-09-13
+Depends on: Update_15 (TSPLIB SSoT), Update_16R (short-wall), Update_17 (synthetic safety), Update_19 (log/metrics integrity)
+Status: Approved
+
+0) Purpose
+Make every run’s artifacts predictable, portable, and verifiable:
+- One canonical directory per run
+- Stable filename prefix and content set
+- Atomic manifest writing
+- Zero tolerance for NaNs/partial fields
+- CI checks wired to the new output layer
+
+1) Output controller (must use)
+All runners MUST route writes via `output_app.py` (StandardOutputManager).
+Disallow direct writes to `results/` from other modules.
+
+2) Naming & directory schema (authoritative)
+2.1 Timestamp format for names: `YY_M_DD_HHMM` (local time by default).
+    - Default TZ: Australia/Adelaide. Override with env `OUTPUT_TZ=UTC`.
+2.2 Run directory: `results/<TS>_<instance>/`
+    Example: `results/25_9_12_1805_pla33810/`
+2.3 File prefix inside directory: SAME AS DIRECTORY NAME.
+    Example base: `25_9_12_1805_pla33810`
+2.4 Required files in the run directory:
+    - `<base>.tour`    (TSPLIB 1-based tour)
+    - `<base>.json`    (results metrics; see §5 schema)
+    - `<base>.yaml`    (resolved configuration)
+    - `seed_<SEED>.jsonl` per seed (stream of events)
+    - Optional: `<base>.tour.sha256` (sidecar; SHA also in manifest)
+2.5 Collision handling: if `<TS>_<instance>` exists → append `_001`, `_002`, … (already implemented).
+
+3) Standard fields & invariants (recap)
+3.1 Single Source of Truth for lengths: controller TSPLIB-integer re-sum (EUC_2D/CEIL_2D/ATT/GEO).
+3.2 Tour-first acceptance: no tour ⇒ no improvement.
+3.3 No NaNs/Inf in any JSON (events or summaries).
+3.4 Parity triad printed once/run; if `.opt.tour` exists and parity≠OK ⇒ abort.
+3.5 Timekeeping (monotonic): emit `wall_s`, `elapsed_s`, `epochs_completed`, `epoch_s`, `elapsed_from_epochs_s=epochs_completed*epoch_s`. Integrity check per Update_19.
+
+4) Manifest (append-only ledger)
+4.1 Global ledger: `results/manifest.jsonl` (append one line per ACCEPTED run).
+4.2 Record path as repo-relative:
+    `"tour_path": "results/<TS>_<instance>/<base>.tour"`
+4.3 Schema (exact keys; types never NaN/Inf):
+{
+  "instance": "<name>",
+  "metric": "<EUC_2D|CEIL_2D|ATT|GEO>",
+  "mode": "<SH|MH-Lite|MH-Full>",
+  "seed": <int>,
+  "wall_s": <int>,
+  "elapsed_s": <float>,
+  "epochs_completed": <int>,
+  "epoch_s": <int>,
+  "tour_path": "<repo-rel path>",
+  "tour_sha256": "<hex>",
+  "length_tsplib": <int>,
+  "opt": <int|null>,
+  "best_known": <int|null>,
+  "parity": "<OK|FAIL|MATCH_BEST|NEQ_BEST>",
+  "ttt10_s": <int|null>,
+  "ttt5_s": <int|null>,
+  "early_slope": <float|null>,
+  "improvements_per_min": <float|null>,
+  "hive_attrib": "<H1|H3|...|null>",
+  "timestamp_utc": "<ISO8601>"
+}
+
+5) `<base>.json` (run summary) — minimal required fields
+{
+  "instance": "<name>",
+  "n": <int>,
+  "metric": "<EUC_2D|CEIL_2D|ATT|GEO>",
+  "mode": "<SH|MH-Lite|MH-Full>",
+  "wall_s": <int>,
+  "elapsed_s": <float>,
+  "epochs_completed": <int>,
+  "epoch_s": <int>,
+  "elapsed_from_epochs_s": <int>,
+  "time_integrity": "<OK|FAIL>",
+  "best_len_int": <int>,
+  "parity": "<OK|...>",
+  "tour_path": "<repo-rel>",
+  "tour_sha256": "<hex>",
+  "hk_dual_gap_pct": <float|null>,
+  "notes": "<string|null>"
+}
+
+6) Seed logs (per `seed_<SEED>.jsonl`) — key event fields
+- improve/reject events MUST include:
+  { "eval_source":"TSPLIB_INTEGER", "controller_len_int":<int>,
+    "reported_len_raw":<int|null>, "delta_ok":true|false }
+- epoch diagnostics (if emitted) MUST be numeric/null only:
+  { "time_breakdown":{...}, "cross_zone_pct":<float>, "portal_removals_pre80":<int>,
+    "oropt_survival_pct":<float>, "candidate_cap_violations":<int>,
+    "hk_dual_gap_pct":<float|null>, "stall_flag":true|false,
+    "merge_event":"mid"|"end"|null }
+
+7) CI hooks (hard-fail)
+7.1 Banned strings (synthetic/mocks) per Update_17.
+7.2 No-NaN validator: fail if any JSON contains NaN/Inf.
+7.3 Time plausibility (Update_19 §1.3).
+7.4 Artifact guard (post-run, against manifest):
+    - Re-hash `.tour`; compare SHA
+    - Re-sum TSPLIB-integer; compare `length_tsplib`
+7.5 Schema check: manifest keys present; types valid.
+
+8) Runners integration (already done)
+- `scripts/run_benchmarks.py`
+- `scripts/run_large3.py`
+- `scripts/run_auto_parallel.py`
+All must call `StandardOutputManager` to construct `<TS>_<instance>` directory and write files atomically.
+
+9) Example tree (reference)
+results/
+  25_9_12_1805_pla33810/
+    25_9_12_1805_pla33810.tour
+    25_9_12_1805_pla33810.json
+    25_9_12_1805_pla33810.yaml
+    seed_042.jsonl
+    seed_123.jsonl
+    seed_456.jsonl
+  25_9_12_1805_pr2392/
+    ...
+  manifest.jsonl   # global ledger (append-only)
+
+10) Example manifest line (reference)
+{"instance":"pla33810","metric":"CEIL_2D","mode":"SH","seed":42,"wall_s":3600,
+ "elapsed_s":3601.4,"epochs_completed":30,"epoch_s":120,
+ "tour_path":"results/25_9_12_1805_pla33810/25_9_12_1805_pla33810.tour",
+ "tour_sha256":"b6cc...e18","length_tsplib":126242828,"opt":null,"best_known":null,
+ "parity":"OK","ttt10_s":null,"ttt5_s":null,"early_slope":0.92,
+ "improvements_per_min":3.1,"hive_attrib":"H1","timestamp_utc":"2025-09-12T08:36:00Z"}
+
+11) Migration note (optional)
+A helper script (`tools/migrate_results_to_standard.py`) may relocate legacy runs into the new structure and append manifest entries; preserve originals under `results/_archive/`.
+
+12) Effective date
+Immediate for all new runs. CI must reject any run that bypasses `output_app.py` or violates §3–§7.
+End of file.

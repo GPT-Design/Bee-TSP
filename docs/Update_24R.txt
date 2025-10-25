@@ -1,0 +1,183 @@
+Update_24R.txt
+
+Title: Forensic Rollback & Root-Cause Isolation (417k→485k regression)
+Version: 2025-09-16
+Status: Approved
+Depends on: 15, 17, 20, 22, 24
+
+0) Objective
+
+Identify and fix the core algorithm regression causing pr2392@600s to plateau at ~485k instead of ~417k. This plan freezes env/build, restores a known-good codepath, and adds deterministic probes to pinpoint the fault.
+
+1) Env & build freeze (must)
+
+Threads: workers=1, OMP/BLAS/MKL=1
+
+Python seed & RNG: fix random, numpy, and any C++ RNG used.
+
+Compiler flags: set to the same as the last known-good build (archive the exact flags).
+
+Pin deps: write requirements-lock.txt (versions) and verify with pip freeze > _snapshot.txt.
+
+2) Golden baseline harness (K-known run)
+
+Run pr2392@600s (SH) with the exact preset that produced ~417,842 (U22), using the old commit (tag it golden-U22). Emit:
+
+.tour (final), SHA256
+
+<base>.json with: metric_tag, edge_cap, portals, k_used, merge_schedule, ls_ops
+
+seed_*.jsonl with operator usage counters
+
+Save golden artifacts under results/_golden_U22/….
+
+3) Binary diff: code vs config
+
+Checkout current head and run pr2392@600s with all features forced to golden (ignore YAML):
+
+Distance evaluator used in move gains = same integer metric as final (EUC_2D for pr2392)
+
+Local search stack = golden (LK/2–3-opt etc. ON as in U22)
+
+Candidate sets = golden (no caps/portals; Delaunay∪kNN as U22)
+
+Integrator = golden (POPMUSIC cadence same as U22)
+
+Initializers = K=1 minimal
+
+HK = OFF
+
+If this still gives ~485k, the fault lies in core code (not switches).
+
+4) Deterministic probes (add logs; one run only)
+
+Instrument the current code to print (one line each at end):
+
+probe.metric_for_gain: metric actually used for move evaluation
+
+probe.metric_for_length: metric used in controller re-sum (should match .tsp)
+
+probe.candidate_connectivity: % nodes with degree==0 after candidate build (expect 0)
+
+probe.final_tour_in_candidates: % edges of final tour ∈ candidate set (expect high)
+
+probe.ls_ops: counts of 2-opt/3-opt/Or-opt/LK submoves applied
+
+probe.integrator_calls: number and total time for POPMUSIC merges
+
+probe.init_budget_pct: actual % of wall used by initializers
+
+probe.hk_time_pct: actual % time spent in HK (should be 0 in golden test)
+
+5) Three fast isolation tests (pr2392@600s, 1 seed)
+
+A) Gain consistency test (unit): sample 100 random edge swaps on a fixed tour; assert gain(move) == (L_before − L_after) using the same integer metric.
+B) CEIL/EUC sentinel (runtime): re-sum the final tour as EUC_2D and CEIL_2D; print both. If stored length ≈ CEIL re-sum, you’re optimizing with CEIL somewhere.
+C) Candidate integrity: after build, assert graph connectivity; if any node isolated, dump degree histogram.
+
+6) Suspect checklist (common root causes at +16%)
+
+Metric drift in gains: gains computed with CEIL_2D/float while final is EUC_2D → optimizer picks wrong moves.
+
+Candidate under-connectivity: wrong k / missing Delaunay / post-cap pruning breaks connectivity.
+
+Local search disabled/nerfed: LK path not linked / operator thresholds changed → only weak 2-opt.
+
+Integrator off / mis-wired: POPMUSIC not invoked or starved.
+
+RNG seeding changed: deterministic but bad initializer repeatedly chosen (check init mix OFF in golden).
+
+Build flags: compiled without O2/fast-math the way baseline was, changing behavior/timings.
+
+7) Fix protocol
+
+When a probe flags a mismatch:
+
+Metric for gains ≠ metric_tag: unify to one integer evaluator everywhere. Add an assert to prevent divergence.
+
+Candidate connectivity < 100%: restore Delaunay union and raise k; remove caps; assert no node degree==0.
+
+ls_ops too low: ensure LK/Or-opt pipeline compiled and called; restore thresholds to golden.
+
+Integrator_calls=0: re-enable POPMUSIC at golden cadence (mid & end), check wall-time share.
+
+init_budget_pct > 5%: clamp; confirm winner distribution.
+
+hk_time_pct > 0% (in golden): force HK off in the golden pass.
+
+8) Success criteria to close 24R
+
+pr2392@600s returns to ~417,8xx median under current head with probes asserting OK.
+
+fnl4461@1800s and pla33810@5400s show no regression vs archived U22; probes OK.
+
+CI guards added:
+
+Metric-lock: metric_tag == EDGE_WEIGHT_TYPE(.tsp) and used in gains
+
+Dual-resum sentinel: EUC/CEIL re-sum check
+
+Candidate connectivity assert
+
+ls_ops / integrator_calls non-zero sanity
+
+One-liners CC can run
+
+Print pr2392@600s manifest rows (seed, metric, length, tour_path):
+
+python - <<'PY'
+import json
+rows=[json.loads(x) for x in open(r"results\\manifest.jsonl",encoding="utf-8") if x.strip()]
+R=[r for r in rows if r.get("instance")=="pr2392" and r.get("wall_s")==600 and r.get("mode")=="SH"]
+for r in sorted(R, key=lambda x:(x["seed"], x.get("timestamp_utc",""))):
+    print(r.get("seed"), r.get("metric"), r.get("length_tsplib"), r.get("tour_path"))
+PY
+
+
+CEIL/EUC sentinel for one tour (adjust path):
+
+python - <<'PY'
+# re-sum final tour both ways to detect metric drift
+import math, json
+from pathlib import Path
+def parse_tsp(p):
+  H,C,flag={},[],False
+  for s in Path(p).read_text().splitlines():
+    s=s.strip()
+    if not s or s.startswith("COMMENT"): continue
+    if s.startswith("NODE_COORD_SECTION"): flag=True; continue
+    if s.startswith("EOF"): break
+    if flag:
+      parts=s.split()
+      if len(parts)>=3:
+        try:int(parts[0]); x=float(parts[1]); y=float(parts[2])
+        except:x=float(parts[0]); y=float(parts[1])
+        C.append((x,y))
+    elif ":" in s:
+      k,v=[x.strip() for x in s.split(":",1)]; H[k.upper()]=v
+  return H.get("EDGE_WEIGHT_TYPE","EUC_2D").upper(), C
+def parse_tour(p):
+  T,flag=[],False
+  for s in Path(p).read_text().splitlines():
+    s=s.strip()
+    if not s: continue
+    if s.startswith("TOUR_SECTION"): flag=True; continue
+    if s.startswith("EOF"): break
+    if flag:
+      if s=="-1": break
+      T += [int(x) for x in s.split()]
+  return T
+def d_e(a,b): return int(round(math.hypot(a[0]-b[0], a[1]-b[1])))
+def d_c(a,b): return int(math.ceil(math.hypot(a[0]-b[0], a[1]-b[1])))
+tsp="benchmarks\\pr2392.tsp"; tour=r"<PASTE_TOUR_PATH>"
+typ,coords=parse_tsp(tsp); T=parse_tour(tour); t0=[i-1 for i in T]
+L_e=L_c=0
+for i in range(len(t0)):
+  a=coords[t0[i]]; b=coords[t0[(i+1)%len(t0)]]
+  L_e += d_e(a,b); L_c += d_c(a,b)
+print("EDGE_WEIGHT_TYPE in tsp:", typ)
+print("EUC_2D re-sum:", L_e, " | CEIL_2D re-sum:", L_c)
+PY
+
+
+Run the golden vs head tests with probes; with these we’ll know exactly where the 16% gap comes from, and we can fix it at the source.

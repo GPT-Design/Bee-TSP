@@ -1,0 +1,105 @@
+Patch plan (single source of truth for metric)
+1) Wire the metric once, at startup
+
+Read EDGE_WEIGHT_TYPE from <instance>.tsp → metric_tag.
+
+Store in a global, immutable config (or inject into all modules).
+
+# at run init
+metric_tag = read_tsplib_metric(f"benchmarks/{instance}.tsp")  # 'EUC_2D' | 'CEIL_2D' | 'ATT' | 'GEO'
+config.metric_tag = metric_tag
+log.info({"metric_tag": metric_tag})
+
+2) Replace all ad-hoc distance calls with a single factory
+
+Create a Distance object once and pass it everywhere (gain calc, local search, candidate builder, POPMUSIC, HK, etc.).
+
+class Distance:
+    def __init__(self, metric_tag, coords):
+        self.metric = metric_tag
+        self.coords = coords
+        self._f = {"EUC_2D": self._euc, "CEIL_2D": self._ceil, "ATT": self._att}[metric_tag]
+    def _euc(self, i, j):  # integer
+        x1,y1 = self.coords[i]; x2,y2 = self.coords[j]
+        return int(round(((x1-x2)**2 + (y1-y2)**2)**0.5))
+    def _ceil(self, i, j):
+        x1,y1 = self.coords[i]; x2,y2 = self.coords[j]
+        return int(-(-(((x1-x2)**2 + (y1-y2)**2)**0.5) // 1))  # ceil
+    def _att(self, i, j):
+        x1,y1 = self.coords[i]; x2,y2 = self.coords[j]
+        rij = (((x1-x2)**2 + (y1-y2)**2)/10.0) ** 0.5
+        t = int(round(rij));  return t if t >= rij else t+1
+    def d(self, i, j): return self._f(i, j)
+
+
+Do not pick metric inside hot paths; use dist.d(i,j) everywhere.
+
+3) Critical call-sites to audit (flip to Distance)
+
+Move gains / local search (2-opt/3-opt/Or-opt/LK submoves).
+Look for any of: ceil(hypot(...)), fast_len, float_len, EUC2D_*, CEIL2D_*. Replace with dist.d(i,j).
+
+Candidate builder (k-NN, Delaunay bridging): ensure the same integer metric is used for candidate weights and pruning thresholds.
+
+POPMUSIC integrator: when assembling/merging partial tours, use dist.d for edge costs.
+
+HK 1-tree: weights must be the same integer metric (not float).
+
+Any cached distance matrix: rebuild it with the correct metric and invalidate CEIL matrices.
+
+4) Hard assertions (fail fast)
+
+Add these once, run every time:
+
+# After constructing Distance(...)
+assert config.metric_tag in {"EUC_2D","CEIL_2D","ATT"}
+# In gain code (debug build): check a few random edges match controller re-sum
+assert dist.d(i,j) == controller_eval.edge_len(i,j)  # integer equality
+
+Tests (must pass in CI)
+
+CEIL/EUC dual re-sum sentinel (runtime)
+
+For final .tour, compute L_EUC, L_CEIL from the same coords.
+
+If metric_tag=='EUC_2D' and |L_EUC − length_tsplib| > 0.5% → FAIL.
+
+If metric_tag=='EUC_2D' and |L_CEIL − length_tsplib| ≤ 0.1% → FAIL (caught your bug).
+
+Gain consistency unit test
+
+Fix a tour T, pick N random edge swaps; assert
+gain_int(move) == (sum_int(T) − sum_int(T⊕move))
+using Distance (integer) in both places.
+
+Metric lock
+
+At init, assert metric_tag == EDGE_WEIGHT_TYPE(<instance>.tsp) and that all modules use it (no overrides).
+
+Manifest correctness
+
+"metric" must be one of EUC_2D|CEIL_2D|ATT|GEO; never "tour_length".
+
+Keep length_tsplib as the integer length.
+
+Minimal grep sweep (to find offenders)
+
+Run these and replace all hits with Distance:
+
+rg -nE "ceil\s*\(\s*hypot|math\.ceil\(|hypot\(|sqrt\(|float_len|fast_eval|EUC|CEIL|ATT" bee_tsp
+rg -nE "edge[_ ]?len|gain[_ ]?calc|delta[_ ]?len|move[_ ]?gain" bee_tsp
+
+
+Any location doing its own geometry → route it through Distance.
+
+Roll-forward validation (after patch)
+
+Run pr2392@600s (SH) with metric_tag = EUC_2D:
+
+Expect ~417,8xx again (± small).
+
+Sentinel says OK.
+
+Confirm fnl4461@1800s, pla33810@5400s show no regressions; sentinel OK.
+
+Re-enable Update-23 knobs one by one (cap/portals, HK, inits, Or-opt gate) with metric fixed. If they were good ideas, the earlier small gains should reappear.

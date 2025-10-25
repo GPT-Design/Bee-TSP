@@ -1,0 +1,46 @@
+Sk learn:
+python -m venv sklearn-env
+sklearn-env\Scripts\activate  # activate
+pip install -U scikit-learn
+
+I have manually installed it using the commands above
+
+Key takeaways from show_versions():
+
+scikit-learn 1.7.1 on Python 3.12.9 ✅
+
+NumPy 2.3.2, SciPy 1.16.1 (good for KDTree + ConvexHull) ✅
+
+OpenMP + OpenBLAS both reporting 16 threads ⚠️ (watch oversubscription when you run parallel seeds)
+
+Do this before parallel runs (Windows PowerShell)
+
+Set these per-session to avoid “16×workers” slowdown:
+
+$env:OMP_NUM_THREADS = "1"
+$env:OPENBLAS_NUM_THREADS = "1"
+$env:MKL_NUM_THREADS = "1"
+$env:NUMEXPR_NUM_THREADS = "1"
+
+
+(If you spawn workers, ensure each worker inherits these.)
+
+Or, cap threads in Python at runtime (inside each worker, before heavy math):
+
+from threadpoolctl import threadpool_limits
+threadpool_limits(limits=1, user_api=("blas","openmp"))
+
+Quick sanity check for KDTree
+python - << 'PY'
+import numpy as np
+from sklearn.neighbors import KDTree
+X = np.random.RandomState(0).rand(1000, 2)
+d, _ = KDTree(X).query(X, k=2)
+print("Mean 1-NN distance:", float(d[:,1].mean()))
+PY
+
+Optional installs (only if you need them)
+
+Harness/CSV plots: pip install pandas matplotlib
+
+You’re good to proceed with features.py using sklearn.neighbors.KDTree and (since SciPy is present) scipy.spatial.ConvexHull.

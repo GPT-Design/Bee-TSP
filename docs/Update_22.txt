@@ -1,0 +1,51 @@
+Update_22.txt
+Title: Sunset Multi-Hive; Single-Hive (SH) as Sole Production Preset
+Version: 2025-09-14
+Depends on: 15, 16R, 17, 19, 20
+Status: Approved
+
+0) Decision
+Multi-Hive (MH / MH-Lite) is archived as experimental. Single-Hive (SH) is the only production preset.
+
+1) Rationale (brief)
+Short-wall: MH loses or ties SH. Long-wall (pla33810): small gains (<0.2%)—below promotion gates, not worth complexity/overhead.
+
+2) Policy
+- Default mode = SH. All CI, benchmarks, and leaderboards use SH only.
+- MH paths remain compilable but OFF by default and excluded from CI runs.
+- Aggregator hides MH rows unless `--include-experimental` flag is set.
+
+3) Code/config switches
+- YAML defaults:
+
+solver:
+multi_hive:
+enabled: false
+
+- CLI: remove any default that auto-enables MH; require explicit `--mode MH-Lite` to run.
+- Bridges: keep tour-only contract; no length reporting (already enforced).
+- Output/manifest: unchanged (Update_20).
+
+4) CI rules
+- Do not schedule MH runs in CI matrices.
+- `validate_update20_compliance.py` and `artifact_guard.py` remain mandatory for SH.
+- `aggregate_ab_tables.py` excludes MH unless `--include-experimental`.
+
+5) Archival note (docs)
+- Mark MH/MH-Lite “Archived (Experimental)” in docs.
+- Link to Update_16R results + thresholds; note failure to meet promotion gates.
+
+6) Re-admission criteria (future)
+Promote MH only if, across ≥10 seeds:
+- Long-wall ≥ 3600 s shows ≥1.0–2.0% median improvement vs SH on best_len or TTT@10%, with clean guardrails and time integrity.
+
+7) Focus areas for SH (next sprints)
+- Candidate graph: edge cap 8–10; portals/node 3–7; keep halo 10–15%.
+- POPMUSIC cadence: merges at mid & end only.
+- Or-opt: late-only (0–50% forbid, 50–80% intra-zone, ≥80% one global pass, τ≥3–5).
+- Bee-Ball: gated by HK dual-gap stall ≥2 epochs; tight time-box.
+- Bounds: speed/robustness of HK 1-tree on the sparse union.
+- Early-slope: seed diversification (greedy variants), keep TSPLIB-integer everywhere.
+
+8) Aggregator tweak (optional)
+Default: hide MH rows. Expose with `--include-experimental`.

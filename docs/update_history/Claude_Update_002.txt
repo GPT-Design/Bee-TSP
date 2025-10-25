@@ -1,0 +1,113 @@
+Minimal, safe patches (drop-ins)
+A) Make .opt.tour parsing robust (both scripts)
+
+Replace your parse_opt_tour with this (works for Length 6110, Length: 6110, nodes in columns, etc.):
+
+import re
+
+def parse_opt_tour(opt_tour_path):
+    tour = []
+    optimal_length = None
+    in_tour = False
+
+    with open(opt_tour_path, "r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            # Length in comments or standalone lines
+            m = re.search(r"Length\s*:?\s*([0-9]+)", line, re.IGNORECASE)
+            if m and optimal_length is None:
+                optimal_length = int(m.group(1))
+            # Some files: "COMMENT ... (21282)"
+            m2 = re.search(r"\(([0-9]+)\)", line)
+            if m2 and optimal_length is None:
+                optimal_length = int(m2.group(1))
+
+            if line.upper().startswith("TOUR_SECTION"):
+                in_tour = True
+                continue
+            if in_tour:
+                if line == "-1" or line.upper() == "EOF":
+                    break
+                # accept multiple ids per line
+                for tok in line.split():
+                    if tok == "-1":
+                        in_tour = False
+                        break
+                    if tok.isdigit():
+                        tour.append(int(tok) - 1)  # 0-based
+
+    return tour, optimal_length
+
+
+(Apply to both test_optimal_comparison.py and test_all_three_instances.py.)
+
+B) Add TTT + percentiles (aligns with Appendix)
+
+Right after you collect per-seed results and before returning stats, add:
+
+def pctl(vals, q):
+    if not vals: return None
+    vals = sorted(vals)
+    k = max(0, min(len(vals)-1, int(round((len(vals)-1)*q))))
+    return vals[k]
+
+def time_to_target(anytime, target):
+    # anytime: list[(t, best)] sorted by t
+    for t, best in sorted(anytime, key=lambda x: x[0]):
+        if best <= target: return t
+    return None
+
+lengths = [r["length"] for r in results]
+gaps    = [r["gap_pct"] for r in results]
+times   = [r["runtime"] for r in results]
+
+# Percentiles
+p10_gap = pctl(gaps, 0.10)
+p90_gap = pctl(gaps, 0.90)
+
+# TTT @ {1%, 0.5%, 0.1%}
+ttt = {}
+for pct in (0.01, 0.005, 0.001):
+    target = true_opt_length * (1.0 + pct)
+    hits = [time_to_target(r.get("anytime", []), target) for r in results]
+    hits = [h for h in hits if h is not None]
+    key = f"ttt_{int(pct*1000)/10:.1f}pct_s"
+    ttt[key] = (sum(hits)/len(hits)) if hits else None
+
+stats.update({
+    "p10_gap_pct": p10_gap,
+    "p90_gap_pct": p90_gap,
+    **ttt
+})
+
+
+(Again, in both scripts.) This matches the Appendix’s metric set (median + [P10–P90] + TTT).
+
+C) (Optional) Accept a YAML for solver_config
+
+Add an arg:
+
+parser.add_argument('--config', type=str, help='YAML file to load solver config')
+
+
+If provided, load + merge into solver_config (CLI flags can still override). This keeps the test runner and your report in lock-step with one file.
+
+What your latest JSON shows (sanity)
+
+Config: 10 s wall, 2 seeds, k=30, agents/zone=4, agent time 1.2 s, dynamic scouts (8 s stagnation, up to 3 restarts, 0.6 s polish).
+
+Results: att48 best=10818 (+1.79%), ch130 best=6332 (+3.63%) within 10 s; small improvement counts (6–7 / 2–3) indicate the short budget is the limiter, not correctness.
+
+Next quick runs (after the patches)
+
+Use 60 s per run (the scripts already default to that) and 5 seeds:
+
+python test_optimal_comparison.py --time-budget 60 --seeds 42 123 456 789 999
+python test_all_three_instances.py --time-budget 60 --seeds 42 123 456 789 999
+
+
+The summary will now include P10/P90 and TTT (aligned with the Appendix).
+
+If you want, I can hand you a tiny PR-style diff for both test files with these exact changes, but the snippets above are drop-in.

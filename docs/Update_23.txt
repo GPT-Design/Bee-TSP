@@ -1,0 +1,119 @@
+Update_23.txt
+Title: SH Optimization Sprint — Candidate Sets, Bounds, and Anytime Slope
+Version: 2025-09-15
+Status: DRAFT (for review)
+Depends on: 15 (SSoT), 16R (short-wall), 17 (synthetic safety), 19 (metrics integrity), 20 (standard outputs), 22 (sunset MH)
+
+0) Why this update
+We’ve sunset MH; SH is the production path. This sprint focuses on: (i) tighter candidate sets & portals, (ii) robust HK 1-tree bounds in integer units, and (iii) better early-phase anytime slope via seed/initializer diversity — all under our strict evaluation & output guardrails.
+
+1) Objectives (measurable)
+O1. **Early slope**: +0.5–1.0× median Δgap%/min in first 10 min on pr2392@600s and fnl4461@1800s (vs current SH baselines).
+O2. **TTT@10%**: pr2392@900s hits TTT@10% in ≥2/3 seeds.
+O3. **Long-wall stability**: pla33810@5400s achieves ≤ current SH median best_len (no regressions) with stricter candidate caps & portals.
+O4. **Telemetry**: HK dual-gap timelines (integer units) captured per epoch; no NaNs; time integrity OK.
+
+2) Scope (no algorithm detours)
+- Single-Hive only. No island code changes. No EAX/learning/soft-pheromone in production (see §7 backlog).
+- All code must pass Updates 15/17/19/20 guardrails.
+
+3) Work items (implementation)
+W1. **Candidate Manager v1.2 (SH)**
+  - Union graph: **Delaunay ∪ k-NN**, with autoscale `k_base` by n (suggest: n<3k→24, 3k–10k→30, >10k→36), then apply global cap.
+  - **Edge cap per node**: enforce `cap ∈ {8,10}` after union; drop longest excess edges (ties: prefer Delaunay).
+  - **Portals** (cross-zone connectors): per node `P∈{3..7}`; rank by length, Delaunay presence, & (optional) 1-tree incidence (see W2).
+  - Assert/Log: per-node degree histograms; cap violations must be 0.
+
+W2. **HK 1-tree bound (integer units)**
+  - Compute sparse 1-tree LB on the **candidate union graph** (not full graph) with integer weights (EUC_2D/CEIL_2D/ATT/GEO).
+  - Emit per-epoch: `{LB, dual_gap_pct=100*(Lchamp-LB)/LB}`, stall flag if Δ dual-gap ≤ ε across one epoch (ε default: 0.1–0.2%).
+  - Time budget: ≤ 3–5% of wall per run (accumulated). If over, reduce iterations adaptively.
+  - Optional: count edge hits in 1-tree to **nudge portal ranking** (do not increase cap).
+
+W3. **Late-only Or-opt (consolidate)**
+  - Controller time-gate (SH):  
+    0–50%: forbid • 50–80%: allow **intra-zone only**, protect portals  
+    ≥80%: **one** global pass, require integer gain τ ≥ 3–5; protected portals removable only ≥80% and if τ met.
+  - Log: Or-opt survival % to final tour; count protected-edge deletions with ΔL_int.
+
+W4. **Initializer diversity for anytime slope**
+  - For each seed, build **K initial tours** with small budgets; pick best to start. K defaults: 3–4.
+  - Mix: nearest-neighbor, nearest-insertion, farthest-insertion, random greedy (+ quick 2-opt polish).
+  - Budget per initializer: ≤ 1–2% of wall; total ≤ 5%.
+  - Log: initializer winner & per-initializer best_len_int.
+
+W5. **Output & integrity (no-regression)**
+  - All runs via `output_app.py`; update `<base>.json` to include `init_mix:{K, winner}` and `candidate_caps:{cap, portals}`.
+  - Keep parity triad; strict integer SSoT; No-NaN; time integrity checks per Update 19.
+  - CI: fail on any candidate cap violation; fail if HK dual-gap fields missing when HK was enabled.
+
+4) Experiments (exact)
+E1. **Short-wall (primary)**
+  - pr2392 @600s (SH) seeds 42/123/456 → measure early slope (0–10m), improvements/min, best_len_int.
+  - pr2392 @900s (SH) same seeds → TTT@10% target.
+  - fnl4461 @1800s (SH) same seeds → early slope, best_len_int.
+E2. **Long-wall sanity**
+  - pla33810 @5400s (SH) seeds 42/123/456 → ensure ≤ current SH median best_len; examine dual-gap timelines.
+E3. **Ablations (fast, pr2392 @600s)**
+  - A1: `cap=8` vs `cap=10`.
+  - A2: portals/node `3` vs `5` vs `7`.
+  - A3: K initializers `2` vs `4`.
+  - A4: HK on vs HK off (confirm overhead/slope tradeoff).
+
+5) Success gates (pass/fail for Update 23)
+G1. **Early slope:** pr2392@600s median early slope improves by ≥ +0.5× vs current SH baseline; fnl4461@1800s ≥ +0.3×.
+G2. **TTT@10%:** pr2392@900s hits in ≥2/3 seeds.
+G3. **No regressions:** pla33810@5400s median best_len **not worse** than current SH median; telemetry complete.
+G4. **Integrity:** 0 NaNs; candidate cap violations = 0; time integrity = OK; manifest lines valid; tour SHA/length verified.
+
+6) Artifacts (unchanged + extras)
+- Standard directory & filenames (Update 20). `.tour` + SHA256; `<base>.json`; `<base>.yaml`; `seed_*.jsonl`.
+- Manifest JSONL per accepted run; canonical verifier must pass.
+- Extra fields in `<base>.json`:  
+  `{"init_mix":{"K":<int>,"winner":"<name>"},"candidate_caps":{"cap":<int>,"portals":<int>},"hk":{"enabled":true|false}}`
+
+7) Backlog (not in 23; for later)
+- **EAX-Lite (mid-N only, ≤5k)** behind `--experimental-eax` (not for production).
+- **Soft-pheromone Φ** trials limited to scout seeding (off by default).
+- **Deeper LK variants** (variable-k submoves) if Or-opt late-pass saturates.
+
+8) Config knobs (defaults for 23)
+```yaml
+solver:
+  candidate:
+    use_delaunay: true
+    use_knn: true
+    k_base: 30     # autoscale by n in code; this is a mid default
+    edge_cap: 10   # try 8 in ablation
+    portals_per_node: 5
+  hk1tree:
+    enabled: true
+    epoch_budget_pct: 0.05   # ≤5% of wall across run (adaptive)
+    stall_eps_pct: 0.2
+  initializers:
+    K: 4
+    mix: [nn, nearest_insertion, farthest_insertion, random_greedy2opt]
+    total_budget_pct: 0.05
+  local_search:
+    oropt_gate: { forbid_until_pct: 0.5, intra_zone_until_pct: 0.8, tau_gain: 3 }
+  traps:
+    bee_ball: { enabled: true, stall_epochs: 2, halo_pct: 0.10, timebox_s: 10 }
+
+eval:
+  workers: 1
+  threads: 1
+output:
+  standard: true
+
+9. Timeline & deliverables
+
+- Week 1: W1–W3 implementation + unit tests; HK bound timing calibrated.
+
+- Week 2: W4 initializers + telemetry; run E1 + E2; aggregator CSVs + GO/NO-GO summary.
+
+- Week 3 (buffer): Ablations (E3); finalize report: plots (anytime curves, dual-gap), A/B table deltas, decision.
+
+10. Rollback
+- Any integrity breach (No-NaN fail, time integrity fail, cap violations, parity fail) or regression vs pla33810@5400s baseline ⇒ revert W1–W4 toggles to prior defaults and re-run SH baselines.
+
+End of file.

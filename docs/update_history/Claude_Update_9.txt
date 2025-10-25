@@ -1,0 +1,132 @@
+CC Instruction Plan (how to set up multi-hive; no heavy refactor)
+
+All new features default OFF. Implement behind config flags; keep backward compatibility.
+
+1) Config surface (new keys)
+
+Add to base YAML (overridable by CLI overlay):
+
+solver:
+  multi_hive:
+    enabled: false
+    epoch_s: 60
+    hives: ["H1","H2","H3","H4","H5"]
+    # personality deltas/biases
+    profiles:
+      H1: { delta_k: 0,  bias: "none",  bee_ball_boost: 0.0 }
+      H2: { delta_k: 2,  bias: "none",  bee_ball_boost: 0.0 }
+      H3: { delta_k: 4,  bias: "none",  bee_ball_boost: 0.0 }
+      H4: { delta_k: 2,  bias: "corridor",  bee_ball_boost: 0.0 }
+      H5: { delta_k: 4,  bias: "ring_breaker", bee_ball_boost: 0.5 }
+    allocator:
+      method: "ucb1"      # or "thompson" | "greedy"
+      min_slice_s: 30
+      improve_eps_pct: 0.2
+  candidate:
+    use_delaunay: true
+  local_search:
+    use_oropt: false
+integrator:
+  method: "popmusic"
+
+2) Execution model
+
+Single process, sequential slices per epoch (no multi-proc islands at first).
+
+At run start:
+
+Build base candidate sets; compute k_base via autoscaler; precompute PCA axis, hull fraction (for biases).
+
+Create shared champion, EHM, and portal stores (thread-safe if needed later).
+
+Each epoch:
+
+For each active hive in the allocator’s slice plan:
+
+Derive hive-local config (e.g., k = k_base + delta_k; apply bias rules below).
+
+Run the hive for its slice_s budget; allow it to read champion and update EHM.
+
+On improvement ≥ improve_eps_pct, update champion and log.
+
+Compute/update HK bound (or its approximation) and dual_gap.
+
+If dual_gap or global gap stalled ≥ epoch and ring score high, give H5 a Bee-Ball window next epoch.
+
+Recompute allocator slices (see 3).
+
+3) Allocator (bandit-style; simple and observable)
+
+For each hive keep an exponential moving average of reward = (gap_old − gap_new) / slice_s.
+
+UCB1 score = avg_reward + c*sqrt(ln(total_slices)/slices_i) (c≈0.7).
+
+Next epoch: assign larger slice to top-2 hives; enforce min_slice_s; cooldown zero-reward hives once to avoid thrash.
+
+Log a single alloc event per epoch with assigned slices.
+
+4) Personality biases (how to realize them)
+
+delta_k: add to autoscaler result; clamp to sane band per size.
+
+corridor bias (H4): weight/add candidates aligned with the PCA long axis and favor cross-strip bridges (include a few off-axis cross-chords).
+
+ring_breaker (H5): increase α-near radius for cross-chords; lower Bee-Ball threshold (earlier trigger); on Bee-Ball, add 10–20% halo and allow more double-bridge kicks.
+
+5) Shared memory and safety
+
+EHM: increment counts on edges in accepted tours; smooth slightly each epoch.
+
+Champion: store tour + length; updates only when strictly better (respect integer eval); lock for write.
+
+Portals: recompute every 2–3 epochs from boundary nodes with high external degree + EHM score.
+
+6) Bounds (HK 1-tree — practical version)
+
+Compute a 1-tree lower bound on the sparse union graph (candidate union); fast heuristic is OK.
+
+Report hk_bound and dual_gap_pct = 100*(champion_len - hk_bound)/hk_bound.
+
+Use stall of dual_gap as a Bee-Ball trigger condition.
+
+7) Logging (must emit)
+
+Events as in Part A. Add run header to the log with:
+
+{"evt":"run_start","instances":["..."],"seeds":[42,123,456],"epochs":0,"epoch_s":60,"hives":["H1","H2","H3","H4","H5"]}
+
+8) CLI integration (light)
+
+Add --multi_hive (bool), --epoch_s, and optional --hives H1,H2,... to your large CLI; pass through to YAML overrides.
+
+Keep default off (single-hive unless --multi_hive set or YAML enables it).
+
+9) Acceptance & checks for CC to report
+
+Parity must remain OK.
+
+For each instance (per seed):
+
+Final gap, improvements/min, accepts/min.
+
+alloc timeline (which hive got slices).
+
+Which hive produced the final improvement.
+
+hk_bound timeline and Bee-Ball triggers (if any).
+
+Compare multi-hive vs single-hive under equal wall time. Flag wins where final gap improves or anytime slope is better.
+
+10) Rollback
+
+Single switch: solver.multi_hive.enabled: false restores current behavior.
+
+Bee-Balls can be disabled independently when needed.
+
+Notes
+
+Leave Or-opt OFF and UCR OFF for these large-N experiments until their regressions are fixed separately.
+
+Keep threads=1 and workers=1 for evaluation runs to avoid resource contention masking allocator effects.
+
+Multi-proc “islands” can be considered later; the above gives you most of the benefit with minimal machinery.

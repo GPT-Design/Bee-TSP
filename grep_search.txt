@@ -1,0 +1,345 @@
+$ grep -r "LITE" . --exclude-dir=.git
+Binary file ./bee_tsp/integrators/__pycache__/ucr.cpython-312.pyc matches
+./bee_tsp/solver.py:    LITE version of adaptive overlap + portal nodes.
+./bee_tsp/solver.py:    # For LITE version without real zones, identify boundary nodes as those with:
+./bee_tsp/solver.py:    LITE version of 3-opt on stall:
+./bee_tsp/solver.py:                # For LITE version, just do a segment reversal
+./bee_tsp/solver.py:        # Adaptive overlap + portal nodes (LITE version)
+./bee_tsp/solver.py:            # 3-opt on stall logic (LITE version)
+./bee_tsp/solver.py:                    # Apply LITE sequence: double-bridge + 2-opt + targeted 3-edge
+Binary file ./bee_tsp/__pycache__/solver.cpython-311.pyc matches
+Binary file ./bee_tsp/__pycache__/solver.cpython-312.pyc matches
+
+$ grep -r "portal" . --exclude-dir=.git
+./.github/copilot-instructions.md:    portals_per_node: 5      # Boundary discipline
+./.github/copilot-instructions.md:  --halo 0.10 --portals-per-node 5 --edge-cap 10
+./bee-tsp.py:                'portals_per_node': args.portals_per_node,
+./bee-tsp.py:                'portals_per_node': args.portals_per_node,
+./bee-tsp.py:    run_parser.add_argument('--portals-per-node', type=int, required=True, help='Portals per node')
+./bee_tsp/boundary_discipline.py:    portal_budget_per_node: int = 5  # Small fixed budget for cross-zone edges
+./bee_tsp/boundary_discipline.py:    portal_selection_method: str = 'top_connectors'  # How to select portals
+./bee_tsp/boundary_discipline.py:            portal_budget_per_node=boundary_config.get('portal_budget_per_node', 5),
+./bee_tsp/boundary_discipline.py:            portal_selection_method=boundary_config.get('portal_selection_method', 'top_connectors')
+./bee_tsp/boundary_discipline.py:        self.portal_edges: Set[Tuple[int, int]] = set()
+./bee_tsp/boundary_discipline.py:    def select_portal_edges(self, cross_zone_candidates: List[Tuple[int, int, float]]) -> List[Tuple[int, int]]:
+./bee_tsp/boundary_discipline.py:        Select portal edges from cross-zone candidates.
+./bee_tsp/boundary_discipline.py:            Selected portal edges as (u, v) pairs
+./bee_tsp/boundary_discipline.py:        selected_portals = []
+./bee_tsp/boundary_discipline.py:            # Check if both nodes are within their portal budget
+./bee_tsp/boundary_discipline.py:            if (u_count < self.config.portal_budget_per_node and
+./bee_tsp/boundary_discipline.py:                v_count < self.config.portal_budget_per_node):
+./bee_tsp/boundary_discipline.py:                selected_portals.append((u, v))
+./bee_tsp/boundary_discipline.py:        # Store selected portals
+./bee_tsp/boundary_discipline.py:        self.portal_edges = set()
+./bee_tsp/boundary_discipline.py:        for u, v in selected_portals:
+./bee_tsp/boundary_discipline.py:            self.portal_edges.add((u, v))
+./bee_tsp/boundary_discipline.py:        return selected_portals
+./bee_tsp/boundary_discipline.py:    def get_portal_edges(self) -> List[Tuple[int, int]]:
+./bee_tsp/boundary_discipline.py:        """Get currently selected portal edges."""
+./bee_tsp/boundary_discipline.py:        return list(self.portal_edges)
+./bee_tsp/boundary_discipline.py:        for (u, v) in self.portal_edges:
+./bee_tsp/boundary_discipline.py:            'total_portal_edges': len(self.portal_edges),
+./bee_tsp/boundary_discipline.py:                'portal_budget': self.config.portal_budget_per_node,
+./bee_tsp/multi_hive.py:        if 'portal_removals' in epoch_data:
+./bee_tsp/multi_hive.py:            diagnostics['portal_removals'] = epoch_data['portal_removals']
+./bee_tsp/oropt_controller.py:    protect_portals: bool = True  # Protect portal edges
+./bee_tsp/oropt_controller.py:    Controller for late-only Or-opt with portal protection (Update_16R.txt §4).
+./bee_tsp/oropt_controller.py:    - 50-80%: ALLOW intra-zone only, protect portal edges
+./bee_tsp/oropt_controller.py:            protect_portals=oropt_config.get('protect_portals', True)
+./bee_tsp/oropt_controller.py:    def set_protected_portals(self, portal_edges: List[Tuple[int, int]]):
+./bee_tsp/oropt_controller.py:        """Set edges to protect (cross-zone portals)."""
+./bee_tsp/oropt_controller.py:        for u, v in portal_edges:
+./bee_tsp/oropt_controller.py:        """Check if edge is protected (portal edge)."""
+./bee_tsp/oropt_controller.py:        if not self.config.protect_portals:
+./bee_tsp/oropt_controller.py:            # Never remove protected portals unless time_frac ≥ 0.8 and τ met
+./bee_tsp/oropt_controller.py:            'protected_portals': len(self.protected_edges),
+./bee_tsp/solver.py:    LITE version of adaptive overlap + portal nodes.
+./bee_tsp/solver.py:    portal_pct = float(config.get('portal_pct', 2.0))
+./bee_tsp/solver.py:    # Select top portal_pct% nodes as portals
+./bee_tsp/solver.py:        num_portals = max(1, int(n * portal_pct / 100.0))
+./bee_tsp/solver.py:        portals = [node for node, _ in sorted_nodes[:num_portals]]
+./bee_tsp/solver.py:        # Augment candidate graph for portals
+./bee_tsp/solver.py:        for portal in portals:
+./bee_tsp/solver.py:            current_neighbors = set(enhanced_adj[portal])
+./bee_tsp/solver.py:                if j != portal and j not in current_neighbors:
+./bee_tsp/solver.py:                    candidates.append((dist.d(portal, j), j))
+./bee_tsp/solver.py:                enhanced_adj[portal].append(j)
+./bee_tsp/solver.py:                if portal not in enhanced_adj[j]:
+./bee_tsp/solver.py:                    enhanced_adj[j].append(portal)
+./bee_tsp/solver.py:        # Adaptive overlap + portal nodes (LITE version)
+./bee_tsp/update_19_utils.py:                                cross_zone_pct: float, portal_removals_pre80: int,
+./bee_tsp/update_19_utils.py:            'portal_removals_pre80': portal_removals_pre80,
+Binary file ./bee_tsp/__pycache__/solver.cpython-311.pyc matches
+Binary file ./bee_tsp/__pycache__/solver.cpython-312.pyc matches
+./configs/ablations_v2/00_baseline.yaml:    portals_per_node: 5
+./configs/ablations_v2/01_edge_cap_12.yaml:    portals_per_node: 5
+./configs/ablations_v2/01_edge_cap_16.yaml:    portals_per_node: 5
+./configs/ablations_v2/01_edge_cap_8.yaml:    portals_per_node: 5
+./configs/ablations_v2/02_portals_10.yaml:    portals_per_node: 10
+./configs/ablations_v2/02_portals_3.yaml:    portals_per_node: 3
+./configs/ablations_v2/02_portals_7.yaml:    portals_per_node: 7
+./configs/ablations_v2/03_k_init_4.yaml:    portals_per_node: 5
+./configs/ablations_v2/04_init_budget_10.yaml:    portals_per_node: 5
+./configs/ablations_v2/04_init_budget_20.yaml:    portals_per_node: 5
+./configs/ablations_v2/05_oropt_forbid_30.yaml:    portals_per_node: 5
+./configs/ablations_v2/05_oropt_forbid_70.yaml:    portals_per_node: 5
+./configs/ablations_v2/06_merge_3rounds.yaml:    portals_per_node: 5
+./configs/ablations_v2/07_hk_enabled.yaml:    portals_per_node: 5
+./configs/ablation_edge_cap_8.yaml:    portals_per_node: 5
+./configs/ablation_hk_off.yaml:    portals_per_node: 5
+./configs/ablation_inits_2.yaml:    portals_per_node: 5
+./configs/ablation_portals_3.yaml:# A2: portals_per_node=3 ablation config
+./configs/ablation_portals_3.yaml:    portals_per_node: 3        # A2: test portals=3
+./configs/ablation_portals_7.yaml:# A2: portals_per_node=3 ablation config
+./configs/ablation_portals_7.yaml:    portals_per_node: 7        # A2: test portals=7
+./configs/debug_lite_features.yaml:      portal_pct: 2.0
+./configs/lite_features_test.yaml:      portal_pct: 2.0
+./configs/params.yaml:    portals_per_node: 5
+./configs/params_backup.yaml:    portals_per_node: 5 # cross-zone connectors P∈{3..7}
+./configs/params_update23_main.yaml:    portals_per_node: 5 # cross-zone connectors P∈{3..7}
+./configs/params_update24.yaml:    portals_per_node: 5             # U22 default portals (rollback from 
+
+$ grep -r "zone\|zoning" . --exclude-dir=.git
+./.github/copilot-instructions.md:A bio-inspired Traveling Salesman Problem (TSP) solver using bee colony algorithms with zone-based agents, local search, and tour integration. Written in Python 3.12, targeting TSPLIB benchmark instances (50–34,000 cities).
+./.github/copilot-instructions.md:- **`bee_tsp/solver.py`**: Main BeeTSPSolver - zone-based bee agents, Edge Histogram Matrix (EHM), local search (2-opt/3-opt/Or-opt)
+./bee-tsp.py:            'zones': {
+./bee-tsp.py:                'agents_per_zone': 4  # Large-N preset
+./bee-tsp.py:            'zones': {
+./bee-tsp.py:                'agents_per_zone': 4  # Large-N preset
+./bee_tsp/auto_params.py:    zones = dict(solver.get("zones", {}))
+./bee_tsp/auto_params.py:        # Small / lower-mid (e.g., fnl4461): global zone, deeper candidates, more polish
+./bee_tsp/auto_params.py:        zone_size = 999_999  # single zone
+./bee_tsp/auto_params.py:        zone_size = 3000
+./bee_tsp/auto_params.py:        zone_size = 3000
+./bee_tsp/auto_params.py:        zone_size = 3000
+./bee_tsp/auto_params.py:    zones.setdefault("method", "kmeans")
+./bee_tsp/auto_params.py:    zones["target_zone_size"] = int(zone_size)
+./bee_tsp/auto_params.py:    zones["overlap_pct"] = float(overlap)
+./bee_tsp/auto_params.py:    zones["agents_per_zone"] = int(agents)
+./bee_tsp/auto_params.py:    solver["zones"] = zones
+./bee_tsp/auto_params.py:    if n <= 6000:    k, zone, ov, agents, bee = 36, None, 0.0, 6, 0.8
+./bee_tsp/auto_params.py:    elif n <= 10000: k, zone, ov, agents, bee = 28, 3000, 0.005, 4, 0.6
+./bee_tsp/auto_params.py:    elif n <= 30000: k, zone, ov, agents, bee = 26, 3000, 0.005, 4, 0.6
+./bee_tsp/auto_params.py:    elif n <= 60000: k, zone, ov, agents, bee = 26, 3000, 0.004, 4, 0.6  # new band (e.g., pla33810)
+./bee_tsp/auto_params.py:    else:            k, zone, ov, agents, bee = 24, 3000, 0.003, 3, 0.5
+./bee_tsp/auto_params.py:        if zone: zone = min(zone, 2500)
+./bee_tsp/auto_params.py:        cfg.setdefault("solver", {}).setdefault("zones", {})["stripe_partitions"] = True
+./bee_tsp/auto_params.py:    z = sol.setdefault("zones", {})
+./bee_tsp/auto_params.py:    z["target_zone_size"] = zone or 999999
+./bee_tsp/auto_params.py:    z["agents_per_zone"] = agents
+./bee_tsp/boundary_discipline.py:    portal_budget_per_node: int = 5  # Small fixed budget for cross-zone edges
+./bee_tsp/boundary_discipline.py:    Boundary discipline controller ensuring proper zone separation (Update_16R.txt §3).
+./bee_tsp/boundary_discipline.py:    - Portal selection: small fixed budget per node for cross-zone connectors
+./bee_tsp/boundary_discipline.py:        self.zone_assignments: Dict[int, int] = {}  # node -> zone_id
+./bee_tsp/boundary_discipline.py:    def set_zone_assignments(self, assignments: Dict[int, int]):
+./bee_tsp/boundary_discipline.py:        """Set zone assignments for all nodes."""
+./bee_tsp/boundary_discipline.py:        self.zone_assignments = assignments.copy()
+./bee_tsp/boundary_discipline.py:    def calculate_halo_size(self, zone_nodes: List[int], total_nodes: int) -> Tuple[int, float, str]:
+./bee_tsp/boundary_discipline.py:        Calculate appropriate halo size for a zone.
+./bee_tsp/boundary_discipline.py:        zone_size = len(zone_nodes)
+./bee_tsp/boundary_discipline.py:        # Target halo as percentage of zone size
+./bee_tsp/boundary_discipline.py:        min_halo = max(1, int(zone_size * self.config.halo_pct_min))
+./bee_tsp/boundary_discipline.py:        max_halo = max(min_halo, int(zone_size * self.config.halo_pct_max))
+./bee_tsp/boundary_discipline.py:        # Choose halo size based on zone size
+./bee_tsp/boundary_discipline.py:        if zone_size < 20:
+./bee_tsp/boundary_discipline.py:        elif zone_size < 100:
+./bee_tsp/boundary_discipline.py:            halo_size = int(zone_size * 0.12)  # 12%
+./bee_tsp/boundary_discipline.py:            halo_size = int(zone_size * self.config.halo_pct_max)
+./bee_tsp/boundary_discipline.py:        halo_pct = halo_size / zone_size if zone_size > 0 else 0.0
+./bee_tsp/boundary_discipline.py:    def select_portal_edges(self, cross_zone_candidates: List[Tuple[int, int, float]]) -> List[Tuple[int, int]]:
+./bee_tsp/boundary_discipline.py:        Select portal edges from cross-zone candidates.
+./bee_tsp/boundary_discipline.py:            cross_zone_candidates: List of (u, v, weight/distance) for cross-zone edges
+./bee_tsp/boundary_discipline.py:        if not cross_zone_candidates:
+./bee_tsp/boundary_discipline.py:        # Sort by weight (distance) - prefer shorter cross-zone connections
+./bee_tsp/boundary_discipline.py:        candidates_sorted = sorted(cross_zone_candidates, key=lambda x: x[2])
+./bee_tsp/boundary_discipline.py:    def is_cross_zone_edge(self, u: int, v: int) -> bool:
+./bee_tsp/boundary_discipline.py:        """Check if edge crosses zone boundaries."""
+./bee_tsp/boundary_discipline.py:        if u not in self.zone_assignments or v not in self.zone_assignments:
+./bee_tsp/boundary_discipline.py:        return self.zone_assignments[u] != self.zone_assignments[v]
+./bee_tsp/boundary_discipline.py:        cross_zone_edges = 0
+./bee_tsp/boundary_discipline.py:            if self.is_cross_zone_edge(u, v):
+./bee_tsp/boundary_discipline.py:                cross_zone_edges += 1
+./bee_tsp/boundary_discipline.py:        cross_zone_pct = cross_zone_edges / total_edges * 100 if total_edges > 0 else 0.0
+./bee_tsp/boundary_discipline.py:            'cross_zone_edges': cross_zone_edges,
+./bee_tsp/boundary_discipline.py:            'cross_zone_pct': cross_zone_pct,
+./bee_tsp/multi_hive.py:        - Cross-zone edge % in champion (+Δ)
+./bee_tsp/multi_hive.py:        # Cross-zone edge analysis
+./bee_tsp/multi_hive.py:            cross_zone_edges = 0
+./bee_tsp/multi_hive.py:                if self.boundary_discipline.is_cross_zone_edge(u, v):
+./bee_tsp/multi_hive.py:                    cross_zone_edges += 1
+./bee_tsp/multi_hive.py:            cross_zone_pct = cross_zone_edges / total_edges * 100 if total_edges > 0 else 0.0
+./bee_tsp/multi_hive.py:            diagnostics['cross_zone_edge_pct'] = cross_zone_pct
+./bee_tsp/multi_hive.py:            if hasattr(self, '_prev_cross_zone_pct'):
+./bee_tsp/multi_hive.py:                diagnostics['cross_zone_delta'] = cross_zone_pct - self._prev_cross_zone_pct
+./bee_tsp/multi_hive.py:            self._prev_cross_zone_pct = cross_zone_pct
+./bee_tsp/old/old_solver_smol.py:def kmeans_partition(coords: List[Tuple[float,float]], target_zone_size: int, overlap_pct: float, seed: int = 0):
+./bee_tsp/old/old_solver_smol.py:    if target_zone_size <= 0 or target_zone_size >= n or np is None:
+./bee_tsp/old/old_solver_smol.py:    k = max(1, int(math.ceil(n / float(target_zone_size))))
+./bee_tsp/old/old_solver_smol.py:    zones = [np.where(labels==j)[0].tolist() for j in range(k)]
+./bee_tsp/old/old_solver_smol.py:                zones[second[i]].append(int(i))
+./bee_tsp/old/old_solver_smol.py:    zones = [sorted(set(z)) for z in zones if z]
+./bee_tsp/old/old_solver_smol.py:    return zones or [list(range(n))]
+./bee_tsp/old/old_solver_smol.py:        target_zone = int(self.cfg['zones'].get('target_zone_size', 200))
+./bee_tsp/old/old_solver_smol.py:        overlap_pct = float(self.cfg['zones'].get('overlap_pct', 0.15))
+./bee_tsp/old/old_solver_smol.py:        agents_per_zone = int(self.cfg['zones'].get('agents_per_zone', 4))
+./bee_tsp/old/old_solver_smol.py:        zones = kmeans_partition(coords if coords is not None else [(i,0.0) for i in range(n)], target_zone, overlap_pct, seed=seed)
+./bee_tsp/old/old_solver_smol.py:            for zone in zones:
+./bee_tsp/old/old_solver_smol.py:                for _ in range(agents_per_zone):
+./bee_tsp/old/old_solver_smol.py:                    st = random.choice(zone)
+./bee_tsp/old/solver_big-old_2.py:        target_zone = int(self.cfg['zones'].get('target_zone_size', 300))
+./bee_tsp/old/solver_big-old_2.py:        overlap_pct = float(self.cfg['zones'].get('overlap_pct', 0.10))
+./bee_tsp/old/solver_big-old_2.py:        agents_per_zone = int(self.cfg['zones'].get('agents_per_zone', 6))
+./bee_tsp/old/solver_big-old_2.py:        zones = [list(range(n))]  # large-n: global agents
+./bee_tsp/old/solver_big-old_2.py:        if coords is not None and np is not None and target_zone < n:
+./bee_tsp/old/solver_big-old_2.py:            zones = [list(range(n))] if target_zone >= n else [list(range(n))]  # simplify for speed
+./bee_tsp/old/solver_big-old_2.py:            for zone in zones:
+./bee_tsp/old/solver_big-old_2.py:                for _ in range(agents_per_zone):
+./bee_tsp/old/solver_big-old_2.py:                    st = random.choice(zone)
+./bee_tsp/old/solver_big_slo.py:def kmeans_partition(coords: List[Tuple[float,float]], target_zone_size: int, overlap_pct: float, seed: int = 0):
+./bee_tsp/old/solver_big_slo.py:    if target_zone_size <= 0 or target_zone_size >= n or np is None:
+./bee_tsp/old/solver_big_slo.py:    k = max(1, int(math.ceil(n / float(target_zone_size))))
+./bee_tsp/old/solver_big_slo.py:    zones = [np.where(labels==j)[0].tolist() for j in range(k)]
+./bee_tsp/old/solver_big_slo.py:                zones[second[i]].append(int(i))
+./bee_tsp/old/solver_big_slo.py:    zones = [sorted(set(z)) for z in zones if z]
+./bee_tsp/old/solver_big_slo.py:    return zones or [list(range(n))]
+./bee_tsp/old/solver_big_slo.py:        target_zone = int(self.cfg['zones'].get('target_zone_size', 300))
+./bee_tsp/old/solver_big_slo.py:        overlap_pct = float(self.cfg['zones'].get('overlap_pct', 0.10))
+./bee_tsp/old/solver_big_slo.py:        agents_per_zone = int(self.cfg['zones'].get('agents_per_zone', 6))
+./bee_tsp/old/solver_big_slo.py:        zones = kmeans_partition(coords if coords is not None else [(i,0.0) for i in range(n)], target_zone, overlap_pct, seed=seed)
+./bee_tsp/old/solver_big_slo.py:            for zone in zones:
+./bee_tsp/old/solver_big_slo.py:                for _ in range(agents_per_zone):
+./bee_tsp/old/solver_big_slo.py:                    st = random.choice(zone)
+./bee_tsp/oropt_controller.py:    intra_zone_until_pct: float = 0.8  # 50-80%: intra-zone only
+./bee_tsp/oropt_controller.py:    - 50-80%: ALLOW intra-zone only, protect portal edges
+./bee_tsp/oropt_controller.py:            intra_zone_until_pct=oropt_config.get('intra_zone_until_pct', 0.8),
+./bee_tsp/oropt_controller.py:        """Set edges to protect (cross-zone portals)."""
+./bee_tsp/oropt_controller.py:        elif time_frac < self.config.intra_zone_until_pct:
+./bee_tsp/oropt_controller.py:            return 'intra_zone_only'
+./bee_tsp/oropt_controller.py:            scope: 'intra_zone' or 'global'
+./bee_tsp/oropt_controller.py:        elif phase == 'intra_zone_only':
+./bee_tsp/oropt_controller.py:            return scope == 'intra_zone'
+./bee_tsp/oropt_controller.py:                - scope: 'intra_zone' or 'global'
+./bee_tsp/oropt_controller.py:            'can_intra_zone': self.can_apply_oropt(current_time, 'intra_zone'),
+./bee_tsp/solver.py:    Since there's no actual zoning in this implementation, we'll simulate cross-zone behavior
+./bee_tsp/solver.py:    # For LITE version without real zones, identify boundary nodes as those with:
+./bee_tsp/solver.py:        agents_per_zone = int(self.cfg['zones'].get('agents_per_zone', 6))
+./bee_tsp/solver.py:        adaptive_overlap_cfg = self.cfg.get('zones', {}).get('adaptive_overlap', {})
+./bee_tsp/solver.py:        zone = list(range(n))
+./bee_tsp/solver.py:            for _ in range(agents_per_zone):
+./bee_tsp/solver.py:                st = random.choice(zone)
+./bee_tsp/update_19_utils.py:from datetime import datetime, timezone
+./bee_tsp/update_19_utils.py:                                cross_zone_pct: float, portal_removals_pre80: int,
+./bee_tsp/update_19_utils.py:            'cross_zone_pct': cross_zone_pct,
+./bee_tsp/update_19_utils.py:            'timestamp_utc': datetime.now(timezone.utc).isoformat()
+Binary file ./bee_tsp/__pycache__/solver.cpython-311.pyc matches
+Binary file ./bee_tsp/__pycache__/solver.cpython-312.pyc matches
+./configs/ablations_v2/00_baseline.yaml:  zones:
+./configs/ablations_v2/00_baseline.yaml:    target_zone_size: 300
+./configs/ablations_v2/00_baseline.yaml:    agents_per_zone: 6
+./configs/ablations_v2/00_baseline.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/01_edge_cap_12.yaml:  zones:
+./configs/ablations_v2/01_edge_cap_12.yaml:    target_zone_size: 300
+./configs/ablations_v2/01_edge_cap_12.yaml:    agents_per_zone: 6
+./configs/ablations_v2/01_edge_cap_12.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/01_edge_cap_16.yaml:  zones:
+./configs/ablations_v2/01_edge_cap_16.yaml:    target_zone_size: 300
+./configs/ablations_v2/01_edge_cap_16.yaml:    agents_per_zone: 6
+./configs/ablations_v2/01_edge_cap_16.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/01_edge_cap_8.yaml:  zones:
+./configs/ablations_v2/01_edge_cap_8.yaml:    target_zone_size: 300
+./configs/ablations_v2/01_edge_cap_8.yaml:    agents_per_zone: 6
+./configs/ablations_v2/01_edge_cap_8.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/02_portals_10.yaml:  zones:
+./configs/ablations_v2/02_portals_10.yaml:    target_zone_size: 300
+./configs/ablations_v2/02_portals_10.yaml:    agents_per_zone: 6
+./configs/ablations_v2/02_portals_10.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/02_portals_3.yaml:  zones:
+./configs/ablations_v2/02_portals_3.yaml:    target_zone_size: 300
+./configs/ablations_v2/02_portals_3.yaml:    agents_per_zone: 6
+./configs/ablations_v2/02_portals_3.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/02_portals_7.yaml:  zones:
+./configs/ablations_v2/02_portals_7.yaml:    target_zone_size: 300
+./configs/ablations_v2/02_portals_7.yaml:    agents_per_zone: 6
+./configs/ablations_v2/02_portals_7.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/03_k_init_4.yaml:  zones:
+./configs/ablations_v2/03_k_init_4.yaml:    target_zone_size: 300
+./configs/ablations_v2/03_k_init_4.yaml:    agents_per_zone: 6
+./configs/ablations_v2/03_k_init_4.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/04_init_budget_10.yaml:  zones:
+./configs/ablations_v2/04_init_budget_10.yaml:    target_zone_size: 300
+./configs/ablations_v2/04_init_budget_10.yaml:    agents_per_zone: 6
+./configs/ablations_v2/04_init_budget_10.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/04_init_budget_20.yaml:  zones:
+./configs/ablations_v2/04_init_budget_20.yaml:    target_zone_size: 300
+./configs/ablations_v2/04_init_budget_20.yaml:    agents_per_zone: 6
+./configs/ablations_v2/04_init_budget_20.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/05_oropt_forbid_30.yaml:  zones:
+./configs/ablations_v2/05_oropt_forbid_30.yaml:    target_zone_size: 300
+./configs/ablations_v2/05_oropt_forbid_30.yaml:    agents_per_zone: 6
+./configs/ablations_v2/05_oropt_forbid_30.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/05_oropt_forbid_70.yaml:  zones:
+./configs/ablations_v2/05_oropt_forbid_70.yaml:    target_zone_size: 300
+./configs/ablations_v2/05_oropt_forbid_70.yaml:    agents_per_zone: 6
+./configs/ablations_v2/05_oropt_forbid_70.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/06_merge_3rounds.yaml:  zones:
+./configs/ablations_v2/06_merge_3rounds.yaml:    target_zone_size: 300
+./configs/ablations_v2/06_merge_3rounds.yaml:    agents_per_zone: 6
+./configs/ablations_v2/06_merge_3rounds.yaml:      intra_zone_until_pct: 0.8
+./configs/ablations_v2/07_hk_enabled.yaml:  zones:
+./configs/ablations_v2/07_hk_enabled.yaml:    target_zone_size: 300
+./configs/ablations_v2/07_hk_enabled.yaml:    agents_per_zone: 6
+./configs/ablations_v2/07_hk_enabled.yaml:      intra_zone_until_pct: 0.8
+./configs/ablation_edge_cap_8.yaml:  zones:
+./configs/ablation_edge_cap_8.yaml:    target_zone_size: 300
+./configs/ablation_edge_cap_8.yaml:    agents_per_zone: 6
+./configs/ablation_edge_cap_8.yaml:      intra_zone_until_pct: 0.8
+./configs/ablation_hk_off.yaml:  zones:
+./configs/ablation_hk_off.yaml:    target_zone_size: 300
+./configs/ablation_hk_off.yaml:    agents_per_zone: 6
+./configs/ablation_hk_off.yaml:      intra_zone_until_pct: 0.8
+./configs/ablation_inits_2.yaml:  zones:
+./configs/ablation_inits_2.yaml:    target_zone_size: 300
+./configs/ablation_inits_2.yaml:    agents_per_zone: 6
+./configs/ablation_inits_2.yaml:      intra_zone_until_pct: 0.8
+./configs/ablation_portals_3.yaml:  zones:
+./configs/ablation_portals_3.yaml:    target_zone_size: 300
+./configs/ablation_portals_3.yaml:    agents_per_zone: 6
+./configs/ablation_portals_3.yaml:      intra_zone_until_pct: 0.8
+./configs/ablation_portals_7.yaml:  zones:
+./configs/ablation_portals_7.yaml:    target_zone_size: 300
+./configs/ablation_portals_7.yaml:    agents_per_zone: 6
+./configs/ablation_portals_7.yaml:      intra_zone_until_pct: 0.8
+./configs/debug_lite_features.yaml:  zones:
+./configs/debug_lite_features.yaml:    agents_per_zone: 4
+./configs/large_tune.yaml:  zones:
+./configs/large_tune.yaml:    agents_per_zone: 8
+./configs/lite_features_test.yaml:  zones:
+./configs/lite_features_test.yaml:    agents_per_zone: 4
+./configs/params.yaml:  zones:
+./configs/params.yaml:    target_zone_size: 300
+./configs/params.yaml:    agents_per_zone: 6
+./configs/params.yaml:      intra_zone_until_pct: 0.8
+./configs/params_backup.yaml:    portals_per_node: 5 # cross-zone connectors P∈{3..7}
+./configs/params_backup.yaml:  zones:
+./configs/params_backup.yaml:    target_zone_size: 300
+./configs/params_backup.yaml:    agents_per_zone: 6
+./configs/params_backup.yaml:      intra_zone_until_pct: 0.8  # 50-80%: intra-zone only
+./configs/params_update23_main.yaml:    portals_per_node: 5 # cross-zone connectors P∈{3..7}
+./configs/params_update23_main.yaml:  # Standard zone configuration
+./configs/params_update23_main.yaml:  zones:
+./configs/params_update23_main.yaml:    target_zone_size: 300
+./configs/params_update23_main.yaml:    agents_per_zone: 6
+./configs/params_update23_main.yaml:      intra_zone_until_pct: 0.8  # 50-80%: intra-zone only
+./configs/params_update24.yaml:  zones:
+./configs/params_update24.yaml:    target_zone_size: 300
+./configs/params_update24.yaml:    agents_per_zone: 6
+./configs/params_update24.yaml:      intra_zone_until_pct: 0.8
+./create_update19_manifest.py:from datetime import datetime, timezone
+
+$ grep -r "deprecated" . --exclude-dir=.git -i
+./.github/copilot-instructions.md:- **Update_22**: Multi-Hive deprecated - SH (Single-Hive) is production mode
+
+$ grep -r "unused" . --exclude-dir=.git -i
+./bee_tsp/initializers.py:        # choose the nearest unused (not the first)
+./bee_tsp/integrators/popmusic.py:            # jump to nearest unused overall
+./bee_tsp/old/solver_big-old_2.py:            # jump to next unused node (keeps O(n) total)

@@ -1,0 +1,71 @@
+solver:
+  candidate:
+    k: 40
+    use_delaunay: true
+    use_knn: true
+    use_alpha_near: false
+    k_base: 30
+    edge_cap: 10
+    portals_per_node: 3
+  zones:
+    method: kmeans
+    overlap_pct: 0.1
+    target_zone_size: 300
+    agents_per_zone: 6
+  bees:
+    scout_fraction: 0.1
+    stagnation_moves: 500
+    levy_jump_prob: 0.05
+    max_improving_moves: 1200
+    time_budget_s: 1.0
+  local_search:
+    use_lk: false
+    max_k: 3
+    double_bridge: true
+    kick_period_moves: 500
+    use_or_opt: true
+    oropt_gate:
+      forbid_until_pct: 0.5
+      intra_zone_until_pct: 0.8
+      tau_gain: 3
+  integrator:
+    mode: popmusic
+    merge_edge_cap_per_node: 10
+    parents_per_round: 8
+    rounds: 2
+  ehm:
+    smoothing_eps: 0.02
+    max_edges_per_node: 16
+  learning:
+    enabled: false
+    warmup_tours: 100
+    model: gbdt
+    feature_set:
+    - distance
+    - delaunay_adj
+    - degree
+  termination:
+    wall_time_s: 1800
+    target_gap_pct: 1.0
+  multi_hive:
+    enabled: false
+  hk1tree:
+    enabled: false
+    epoch_budget_pct: 0.05
+    stall_eps_pct: 0.2
+  initializers:
+    K: 1
+    mix:
+    - nn
+    total_budget_pct: 0.05
+  traps:
+    bee_ball:
+      enabled: true
+      stall_epochs: 2
+      halo_pct: 0.1
+      timebox_s: 10
+eval:
+  workers: 1
+  threads: 1
+output:
+  standard: true

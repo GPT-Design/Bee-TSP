@@ -1,0 +1,100 @@
+Experiment Design (what to run, what to measure)
+Goal
+
+Show that a multi-hive (island) Bee-Swarm with diverse “personalities” improves anytime performance on large instances (n ≳ 2k) vs a single-hive baseline, without breaking small cases.
+
+Instances & Budgets
+
+pr2392 (opt known): 10 min (600 s)
+
+fnl4461 (best-known): 30 min (1,800 s)
+
+pla33810 (opt known): 60–90 min (3,600–5,400 s)
+
+Seeds: 42, 123, 456 (fixed).
+Concurrency for eval runs: workers=1, BLAS/OpenMP threads=1.
+
+Baseline (single hive)
+
+Candidates: Delaunay ∪ k-NN; k = k_base (autoscaler/current).
+
+Integrator: popmusic (recombination OFF).
+
+Agents/zone: 4.
+
+Per-bee time: 2–3 s.
+
+Or-opt: OFF.
+
+Multi-Hive (5 profiles; equal total wall-time, reallocated by epochs)
+
+Let autoscaler compute k_base per instance; hives apply deltas/biases:
+
+H1 Baseline: Δk=0; default candidate union.
+
+H2 k+2: Δk=+2; otherwise baseline.
+
+H3 k+4: Δk=+4 (your ablation winner).
+
+H4 Corridor-biased: Δk=+2; PCA axis bias for candidate sets (favor cross-strip bridges).
+
+H5 Ring-breaker: Δk=+4; extra cross-chords (α-near increase); Bee-Ball threshold lower in hotspots.
+
+Epoch length: 30–60 s. Start with equal slices; reallocate by Δgap/second (smoothed).
+
+Shared State (lightweight, cross-hive)
+
+Champion tour (best global); read-only for miners; written only on true improvement.
+
+EHM (edge histogram) accumulated across hives (to steer candidates, Bee-Balls).
+
+Portal set (top cross-zone connectors) if zoning active.
+
+No whole-tour migration initially (keep diversity). Use champion as optional warm start for 1–2 hives only.
+
+Bee-Ball trigger (hotspot strike)
+
+Condition: ring score high (e.g., hull fraction ↑, perimeter-edge density ↑) AND dual gap or global gap stalled ≥ epoch.
+
+Action: Carve hotspot subgraph + 10–20% halo; spawn time-boxed intensification (same hive’s slice); patch via popmusic.
+
+Bounds (for analysis/gating)
+
+Add Held–Karp 1-tree (even approximate on the sparse union graph) → report dual gap per epoch. Use stall of this gap to justify Bee-Ball calls.
+
+Metrics (per instance & per seed)
+
+Anytime: best length vs time; TTT@opt (exact match) or TTT@{0.1, 0.5, 1.0}% (floor thresholds).
+
+Final gap (% vs opt/best-known).
+
+Improvements/min and accepts/min.
+
+Time share: local search vs “other” (recombination/overheads/Bee-Balls).
+
+Candidate coverage: % of final-tour edges present in the hive’s candidate sets.
+
+Hive attribution: which hive produced the last ≥0.2% improvement.
+
+Logging (JSONL, append-only)
+
+One line per event (timestamps in seconds from run start):
+
+{"t":12.3,"evt":"hive_start","hive":"H3","slice_s":60,"k":28}
+{"t":34.5,"evt":"improve","hive":"H3","new_len":229622,"delta_len":-1400,"gap_pct":25.77}
+{"t":60.0,"evt":"alloc","epoch":1,"slices":{"H1":30,"H2":30,"H3":60,"H4":30,"H5":30}}
+{"t":90.0,"evt":"hk_bound","value":220000,"dual_gap_pct":4.4}
+{"t":120.0,"evt":"hornet_start","hive":"H5","|S|":160}
+{"t":132.0,"evt":"hornet_improve","hive":"H5","delta_len":-950}
+
+Success Criteria
+
+pr2392 @600 s: multi-hive median gap ≤ 11–12% (improve over single-hive).
+
+fnl4461 @1,800 s: median gap ≤ 28–30% (beat single-hive with same wall).
+
+pla33810 @3,600–5,400 s: first milestone ≤ 65–70%.
+
+Robustness: no parity FAILs; improvements distributed across ≥2 hives on at least one instance.
+
+Ablation: multi-hive vs single-hive under equal wall shows better anytime slope and lower final gap on ≥2/3 instances.

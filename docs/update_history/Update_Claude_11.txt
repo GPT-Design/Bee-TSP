@@ -1,0 +1,197 @@
+Goal
+
+Finish the bridge between the multi-hive controller and the actual solver so that:
+
+each hive runs real improvement work during its epoch slice,
+
+rewards (Δgap/sec) feed UCB1,
+
+Champion/EHM/HK bound update correctly,
+
+time accounting is accurate (no more total_time_s: 0.0, no ∞ lengths).
+
+A) Minimal Interfaces (contracts only)
+
+Implement/adapt these lightweight contracts (no heavy refactor; adapt to existing names):
+
+Solver side (per hive)
+
+BeeTSPSolver.configure(profile) -> None
+Apply hive personality (Δk, biases, Bee-Ball tuning).
+
+BeeTSPSolver.warm_start(champion_tour_or_None) -> None
+Optional: seed from current champion if profile allows.
+
+BeeTSPSolver.improve(time_budget_s: float) -> Result
+Runs local search for up to time_budget_s wall seconds. Returns:
+
+Result = {
+  "improved": bool,                 # true if global best within this hive improved
+  "best_len": int,                  # hive’s current best tour length (integer eval)
+  "accepted_moves": int,            # accepted improving moves
+  "time_used_s": float,             # wall time actually spent
+  "tour_if_improved": list[int] | None,  # optional: champion-quality tour
+  "edges_if_improved": list[tuple[int,int]] | None,  # for EHM
+  "hk_bound_local": int | None      # optional: quick LB for logging
+}
+
+
+Must return time_used_s > 0 even if no improvement (e.g., a tiny 0.01s min).
+
+Shared state (owned by the controller)
+
+SharedChampion.len: int (∞ initially), SharedChampion.tour: list[int] | None
+
+EHM.add_edges(edges: Iterable[(u,v)], weight=1.0) (safe to call any time)
+
+Bounds.set_hk(value: int) / Bounds.get_hk() -> int | None (epoch-level)
+
+B) Epoch Loop (what Multi-Hive must do each slice)
+
+For each epoch:
+
+Slice plan (UCB1 / allocator) → a list of (hive_id, slice_s).
+
+For each (hive_id, slice_s) in plan:
+
+Apply hive profile once (on first visit): solver.configure(profile)
+
+Optionally warm-start:
+
+If profile allows and SharedChampion.tour exists, call solver.warm_start(...)
+
+Run work: res = solver.improve(slice_s)
+
+Time accounting: hive.total_time_s += max(res.time_used_s, ε); run.total_time_s += ...
+
+Compute reward (Δgap/sec):
+
+Let prev_len = hive.prev_len or SharedChampion.len
+
+If res.best_len is a finite int and < prev_len:
+delta_len = prev_len - res.best_len
+reward = (delta_len / prev_len) / max(res.time_used_s, ε) # relative gap drop per second
+Update UCB stats for this hive.
+
+Else set reward = 0.0
+
+Champion update (strict improvement only):
+
+If res.best_len < SharedChampion.len:
+
+SharedChampion.len = res.best_len
+
+SharedChampion.tour = res.tour_if_improved or pull from solver
+
+If res.edges_if_improved: EHM.add_edges(...)
+
+LOG {"evt":"improve","hive":hive_id,"new_len":..., "delta_len":...}
+
+Housekeeping:
+
+If res.hk_bound_local available, keep most stringent at epoch end.
+
+Accumulate hive.accepted += res.accepted_moves
+
+hive.prev_len = min(hive.prev_len or ∞, res.best_len or ∞)
+
+Bounds & Bee-Ball policy (end of epoch):
+
+Compute/refresh HK 1-tree bound (fast variant on candidate union).
+Bounds.set_hk(lb) and LOG {"evt":"hk_bound","value":lb,"dual_gap_pct":...}
+
+If dual gap stalled and ring score high → arm ring-breaker hive next epoch with a Bee-Ball slice (don’t block others).
+
+Re-allocate (UCB1):
+
+Update per-hive avg_reward, n_slices and recompute slice plan for next epoch.
+
+Enforce min_slice_s and optional cooldown for zero-reward hives.
+
+LOG {"evt":"alloc","epoch":k,"slices":{"H1":..., ...}}.
+
+Key invariants
+
+All lengths are integer TSPLIB eval (same path the harness uses).
+
+Champion only updates on strict improvement (≥1 unit).
+
+time_used_s is always added; never leave it at 0.0.
+
+C) Time & Parity Guards (prevent the Infinity / zero-time issues)
+
+On entry to run: SharedChampion.len = ∞, run.total_time_s = 0.0
+
+After every improve(slice) call:
+
+If res.time_used_s <= 0: set to a tiny ε (e.g., 0.01s) to keep denominators sane.
+
+If res.best_len is None, NaN, or ≥ very_large: do not update hive prev_len or Champion; set reward=0.
+
+At summary, assert:
+
+run.total_time_s > 0
+
+No parity FAILs (never treat best < best_known as success).
+
+D) Logging (what CC must emit)
+
+Append JSONL events with timestamps (seconds since run start):
+
+run_start (instances, seeds, epoch_s, hive list)
+
+hive_start per slice (hive id, slice_s, profile snapshot incl. Δk, biases)
+
+improve on Champion updates (hive, new_len, delta_len, gap_pct)
+
+alloc (epoch allocation map)
+
+hk_bound (value, dual_gap_pct)
+
+summary (per hive time, accepted_moves, best_len; global best_len, total_time_s)
+
+E) Unit & Integration Checks (fast to run)
+
+Stub solver smoke test
+Replace the mock with a deterministic stub that:
+
+burns time_used_s≈0.05s,
+
+decrements best_len by a fixed amount on every call for H3 only,
+
+returns edges to EHM.
+Expect: UCB1 pushes slices to H3 by epoch 2; Champion improves; total_time_s > 0.
+
+Parity line
+In the integration test, once Champion is finite, re-sum with the same eval path and assert len >= best_known (never below).
+
+Reward sanity
+If res.best_len == prev_len: reward=0 (no false positives).
+If res.best_len > prev_len: reward=0 (regressions don’t earn budget).
+
+HK bound presence
+At least once per run: hk_bound logged and dual_gap_pct finite.
+
+F) Acceptance for this update
+
+Multi-hive run produces non-zero total_time_s, ≥1 improve event, and non-empty alloc events across ≥2 epochs.
+
+Champion length strictly decreases at least once; EHM receives edges.
+
+UCB1 reallocates slices toward the hive that actually improved.
+
+No parity FAILs; summary includes per-hive time and accepted moves.
+
+G) Next (after the bridge works)
+
+A/B vs single-hive at fixed walls (600s pr2392; 1800s fnl4461) to confirm the multi-hive win on TTT@10% and final gap.
+
+Then consider enabling the soft-pheromone (Insectoid) as an optional allocator mask for scout seeding / Bee-Ball scheduling.
+
+Notes to CC
+
+Do not change solver math; this update is wiring only.
+
+Keep new features behind existing YAML flags; default behavior must match current single-hive when multi_hive.enabled=false.
+
+If the mock solver remains in place for tests, also add the tiny deterministic stub described in E1 to validate UCB/Champion behavior end-to-end.

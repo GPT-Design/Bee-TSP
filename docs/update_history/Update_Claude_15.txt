@@ -1,0 +1,94 @@
+Claude_Update_015.txt — Kill Synthetic Lengths, Make TSPLIB Eval Unavoidable
+0) Situation
+
+Tri-sum exposed that the multi-hive bridge still reports synthetic-scale lengths (e.g., 157,462) while the TSPLIB re-sum is 354,932 on fnl4461.
+
+Prior “best-known” signals were artifacts of the wrong evaluation path.
+
+1) Non-negotiable policy (single source of truth)
+
+Every length used for: logging, rewards, champion updates, TTT targets, HK dual-gap, and summaries must be computed by the TSPLIB integer evaluation on raw coordinates (the same path the harness uses). No other path is allowed in production runs.
+
+2) Immediate actions (bridge & guards)
+
+A) Wire the controller to tour-first evaluation
+
+The multi-hive controller must only accept an improvement if it receives a tour and recomputes its length via the TSPLIB evaluator.
+
+Controller updates Champion and UCB1 rewards using that recomputed integer length only.
+
+If a solver returns a length without a tour, treat it as diagnostic only, not authoritative.
+
+B) Hard runtime guards (abort loudly)
+
+At run start: print the parity triad once (instance, metric_tag, opt_eval_tsplib or NA, best_known, parity). If parity=FAIL for instances with .opt.tour, TERMINATE the run.
+
+At every champion update: re-sum the provided tour with the TSPLIB eval and assert it equals the “new_len” being logged. If not, raise and abort.
+
+For rewards: compute Δgap/sec from integer lengths only (never from synthetic deltas).
+
+C) Kill synthetic lengths in production
+
+Introduce a run context flag with three named modes: tsplib | synthetic | unit.
+
+Default for all CLI runs: tsplib.
+
+In tsplib, any attempt to use normalized/feature coords or a synthetic evaluator must raise.
+
+synthetic is allowed only inside unit tests; never enabled via CLI.
+
+Remove any “auto fallback” to synthetic evaluators in production paths.
+
+D) Bounds in the same units
+
+Ensure HK 1-tree LB (even the sparse/approx version) returns TSPLIB integer units. Dual-gap must be meaningful.
+
+E) Logging (keep minimal, make it unambiguous)
+
+run_start (instance, metric_tag, wall, epoch_s, hives), the parity triad.
+
+improve (hive, new_len_TSPLIB, delta_len, gap_pct).
+
+alloc per epoch; hk_bound per epoch (value, dual_gap_pct).
+
+summary with the final .tour path + SHA256 and best_len (TSPLIB integer).
+
+3) Tests CC must run (fast, decisive)
+
+Mismatch sentinel test
+Feed the controller a solver result where reported_len != tsplib_eval(tour). Expect: controller aborts with a clear error.
+
+Small instance parity
+Run att48 with .opt.tour: parity triad prints opt_eval_tsplib == best_known and run proceeds; any mismatch → aborts.
+
+Live multi-hive smoke
+Run pr2392 @ 60–120 s: confirm ≥1 improve event and that the logged new_len equals the controller’s TSPLIB recompute.
+
+4) Clean up & communication
+
+Mark all previous “new best-known” mentions as invalidated due to evaluation-path bug; keep the verification report that caught it (this shows rigor).
+
+Add a one-liner to the top of the current report:
+“All results from <date range> were rescored under TSPLIB; any synthetic-scale figures are withdrawn.”
+
+5) After the fix — rerun the minimal A/B
+
+pr2392 @ 600s (SH vs MH), seeds 42/123/456, workers=1, threads=1.
+
+fnl4461 @ 1800s (SH vs MH), same conditions.
+Output: final lengths, TTT@10%, anytime slope (first 10 min), hive attribution.
+Write .tour + SHA256 for both arms.
+
+6) Acceptance criteria for Update 15
+
+Any attempt to log or use a length not produced by TSPLIB re-sum of a tour is blocked.
+
+Parity triad prints once; att48 parity enforces abort on FAIL.
+
+The rerun A/B tables are TSPLIB-aligned and each run emits a .tour artifact whose SHA256 is recorded.
+
+No parity FAILs in accepted results.
+
+Why this is the right next step
+
+You already built the safety net; it worked and caught a seductive false positive. This update makes TSPLIB evaluation unavoidable, preventing scale leaks from normalized/synthetic paths. Then we’ll rerun the A/B and keep climbing—cautiously and credibly.

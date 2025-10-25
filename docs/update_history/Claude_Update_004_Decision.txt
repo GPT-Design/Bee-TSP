@@ -1,0 +1,154 @@
+Here’s a concise, copy-paste plan you can hand to CC to resolve scope and proceed safely.
+
+---
+
+# CC\_SCOPE\_ADJUSTMENT.md — Bee-TSP Actions 4–8 (Lite Plan)
+
+## Decision
+
+Proceed with: **(1) implement Actions 7–8 now**, **(2) add lite stubs for 4–6 behind config flags**, **(3) run tests and report**. Avoid heavy refactors and sklearn.
+
+---
+
+## 7–8) Harness + CSV (DO NOW)
+
+**Files:** tests harness, CSV loader
+
+* Extend `benchmarks/best_known.csv` schema to:
+
+  ```
+  instance,best_known,op.tour_available
+  ```
+* If `op.tour_available == 'Y'` **and** `<tsplib_dir>/<instance>.opt.tour` exists:
+
+  * Compute **TTT\@opt** (first timestamp tour == best\_known).
+  * Also emit **TTT\@0.1%**.
+* Else emit **TTT\@1%**, **TTT\@0.5%**, **TTT\@0.1%**.
+* Keep existing outputs (median, P10–P90, anytime curves).
+
+Deliverable: updated harness + new summary including TTT\@opt when applicable.
+
+---
+
+## 4) Adaptive Overlap + Portals (LITE, no zoning refactor)
+
+**Goal:** improve cross-zone connectivity without changing zone membership.
+
+**Files:** wherever candidate adjacency is built/applied.
+
+* Config:
+
+  ```yaml
+  solver:
+    zones:
+      adaptive_overlap:
+        enabled: true
+        portal_pct: 2.0     # top % boundary nodes to treat as portals
+  ```
+* Algorithm (post-zoning, pre-search):
+
+  1. For each node, detect if it has any **k-NN neighbor** in a different zone → mark as **boundary**.
+  2. Score boundary nodes:
+     `score = (# cross-zone neighbors in k-NN) + EHM_edge_count(node)` (use 0 if EHM not present).
+  3. For each zone, pick top `portal_pct`% by score.
+  4. **Augment candidate graph** only: for each portal, add its k nearest neighbors from adjacent zones into its candidate set (do **not** duplicate nodes or change zone labels).
+* No sklearn. Reuse existing k-NN candidate lists. If missing EHM, ignore that term.
+
+Deliverable: `zones.adaptive_overlap.enabled` adds cross-zone candidates; no structural changes.
+
+---
+
+## 5) 3-opt on stall (LITE)
+
+**Goal:** cheap “unstick” step without full 3-opt engine.
+
+**Files:** `bee_tsp/solver.py` (outer local-search loop)
+
+* Config:
+
+  ```yaml
+  solver:
+    local_search:
+      stall_windows: 2
+      three_opt_lite: true
+      tri_budget: 1500
+  ```
+* Logic:
+
+  ```python
+  if improved: stall_windows = 0
+  else: stall_windows += 1
+
+  if cfg.ls.three_opt_lite and stall_windows >= cfg.ls.stall_windows:
+      # LITE sequence:
+      # A) double-bridge kick (random 4-cut) on current tour
+      # B) immediate bounded 2-opt polish (existing)
+      # C) targeted 3-edge try: choose the current tour’s longest edge e,
+      #    try reconnects using only triangles drawn from candidate_adj around e’s endpoints,
+      #    cap attempts at tri_budget
+      stall_windows = 0
+  ```
+* If targeted 3-opt is too heavy, implement A+B only; keep the same config gate.
+
+Deliverable: “on-stall” kick + bounded repair with zero impact unless enabled.
+
+---
+
+## 6) Recombination (EAX-LITE = UCR)
+
+**Goal:** provide a minimal, EAX-like recombination without full EAX complexity.
+
+**Files:** `bee_tsp/integrators/ucr.py` (new) + switch in solver
+
+* Config:
+
+  ```yaml
+  integrator:
+    method: "popmusic"   # default
+    ucr:
+      parents: 6
+      children_per_pair: 1
+      repair_budget_ms: 50
+  ```
+* Algorithm (Union-Cycle Recombine):
+
+  1. Given parents A,B, compute **U = edges(A) ∪ edges(B)**; find **symmetric-difference cycles** (AB-cycles) by walking degree-2 nodes.
+  2. Flip each cycle (or a random subset) to build child.
+  3. Run bounded 2-opt repair on **candidate-union graph** (time-cap `repair_budget_ms`).
+  4. Keep best child.
+* Hook: add `integrator.method: "ucr"` path; keep POPMUSIC as default. No external deps.
+
+Deliverable: working “ucr” option that’s simpler than full EAX.
+
+---
+
+## Features & Autoscaler note (NO sklearn)
+
+If `features.py` exists or you add it, **do not import sklearn**. Use one of:
+
+* Prefer `scipy.spatial.cKDTree` if available.
+* Else approximate 1-NN scale using existing candidate graph: `r1_mean = mean(min_neighbor_distance)` from k-NN list (temporarily build k=10 if smaller).
+* Convex hull: include a tiny Andrew’s monotone chain (pure NumPy) or set `hull_frac = 0.0` if unavailable.
+* Keep `autoscale_v2` functional with these approximations.
+
+---
+
+## Acceptance (for this scope)
+
+* Build passes; no new heavy dependencies.
+* Small/mid baseline unchanged unless new flags are enabled.
+* Harness emits **TTT\@opt** where possible and preserves prior metrics.
+* With `adaptive_overlap.enabled=true` and/or `three_opt_lite=true` and/or `integrator.method=ucr`, runs complete and produce metrics (no crashes), even if gains are modest.
+
+---
+
+## Reporting
+
+When done, report:
+
+* Diffs (files added/modified).
+* Confirmation that new flags **default off** (except harness updates).
+* A short run on `att48, eil101, ch130, kroA100` showing the harness outputs including TTT\@opt.
+* A short run on one larger instance (e.g., `pr2392` or `pla7397`) confirming no regressions.
+
+---

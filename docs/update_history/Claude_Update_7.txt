@@ -1,0 +1,95 @@
+You cannot beat a proven optimum.
+Negative gaps (e.g., att48: 9812 vs 10628, −7.68%) mean a bug in evaluation, not “genuine improvement.”
+
+Here’s a tight 5-minute triage to fix it.
+
+1) One-shot parity check (must pass)
+
+Sum the official .opt.tour with the same eval the harness uses. It must equal best_known.
+
+# quick_check_parity.py
+from bee_tsp.tsplib import load_tsplib, load_opt_tour  # whatever your loader is
+from bee_tsp.metrics import build_eval_fn
+import sys, os, json
+
+tsp = sys.argv[1]          # e.g., data/tsplib/att48.tsp
+opt = sys.argv[2]          # e.g., data/tsplib/att48.opt.tour
+cfg = {"metric":{"type":"tsplib","integer":True}}
+
+ins = load_tsplib(tsp)
+eval_tour = build_eval_fn(cfg, ins)
+
+tour = load_opt_tour(opt)              # 1-based in file → convert to 0-based here
+opt_len = eval_tour(tour)
+print("OPT_EVAL:", opt_len)
+
+
+Expected:
+
+OPT_EVAL: 10628   # for att48
+
+
+If not, stop—your eval path is wrong.
+
+2) The #1 culprit: missing the closing edge
+
+This exact symptom (big negative gap on small TSPLIB) happens when you sum only n-1 edges (path) instead of n edges (cycle).
+
+Fix the eval to always wrap:
+
+def eval_tour(tour):
+    s, n = 0, len(tour)
+    for i in range(n):
+        s += dist(tour[i], tour[(i+1) % n])   # ← includes closing edge
+    return int(s)
+
+
+Add a cheap sanity assert once per tour:
+
+assert len(set(tour)) == len(tour) == ins.n, "tour must be a permutation"
+
+3) Guard the harness (don’t celebrate a FAIL)
+
+Right after you compute best_overall:
+
+parity = "OK"
+if has_opt and best_overall < best_known:
+    parity = "FAIL"
+    print(f"[WARN] METRIC_MISMATCH? {instance}: best {best_overall} < best_known {best_known}")
+    # Option A: abort the run
+    # sys.exit(2)
+
+
+And compute TTT@opt only on equality:
+
+hit_opt = (best_len == best_known)      # not best_len <= best_known
+
+4) Double-check the other usual suspects
+
+Metric/rounding: EUC_2D must be nearest-integer; CEIL_2D uses ceil; ATT uses pseudo-Euclidean. Ensure wrap_dist enforces this.
+
+Indexing: .opt.tour is 1-based; convert to your 0-based indices before evaluation.
+
+Instance mix-up: Make sure the instance name used for best_known matches the .tsp actually loaded.
+
+Don’t eval on normalised coords: features.py normalises copies for SST; evaluation must use the original TSPLIB coordinates.
+
+5) Quick sanity: print both sums
+
+Add this once to your harness for any instance with an opt tour:
+
+opt_len_solver = eval_tour(opt_tour)
+print(f"[PARITY] {instance}: opt_eval={opt_len_solver} best_known={best_known}")
+
+
+They must match. If they do and you still see negative gaps on your own tours, you’re summing a path there—fix the wrap.
+
+Once you do the above, the table should read:
+
+att48: best_found = 10628, gap 0.00%, parity OK, TTT@opt ~0.2–5 s
+
+kroA100: best_found = 21282, gap 0.00%, parity OK, TTT@opt a few seconds
+
+ch130: small positive gap unless you hit opt
+
+Ping me with the single line printed by step 5 for att48; if it’s not 10628/10628, I’ll point you to the exact spot that’s off.

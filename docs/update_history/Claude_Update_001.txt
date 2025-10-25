@@ -1,0 +1,117 @@
+Here’s a concise “do-the-change” prompt for Claude Code to patch your repo.
+
+Project: Bee-TSP
+Goal: Add two small hooks to bee_tsp/solver.py
+
+a metric provider (config-driven; keeps current behavior by default),
+
+dynamic scout restarts on stagnation (EHM-biased).
+
+Files to edit
+
+bee_tsp/solver.py (main changes)
+
+Ensure EdgeHistogram.sample_tour(...) exists in bee_tsp/solver.py (or wherever it lives) and accept new args
+
+Files already present (don’t re-create)
+
+bee_tsp/metrics.py (has build_cost_fn, wrap_dist)
+
+YAML config you edited with solver.scouting.dynamic.*
+
+REQUIRED PATCHES (minimal, backward-compatible)
+1) Metric hook
+
+At top of bee_tsp/solver.py imports:
+
+from bee_tsp.metrics import build_cost_fn, wrap_dist
+
+
+Right after loading the TSPLIB instance (you’ll see ins = load_tsplib(instance_path)):
+
+ins = load_tsplib(instance_path)  # existing
+cfg_here = self.cfg if hasattr(self, "cfg") else cfg  # works class/function
+
+# Metric wrapper (default = TSPLIB behavior)
+cost = build_cost_fn(cfg_here, ins)
+integer = bool(cfg_here.get("metric", {}).get("integer", True))
+dist = wrap_dist(cost, integer=integer)   # use 'dist(i,j)' exactly as before below
+
+
+All existing code continues to use dist(i,j). No behavior change unless a metric is specified in YAML.
+
+2) Dynamic scouts (stagnation restarts)
+
+Read knobs near start of solve(...):
+
+dyn = (cfg_here.get("scouting", {}) or {}).get("dynamic", {})
+scout_enabled = bool(dyn.get("enabled", True))
+no_improve_s  = float(dyn.get("no_improve_s", 120.0))
+max_restarts  = int(dyn.get("max_restarts_per_seed", 3))
+polish_time_s = float(dyn.get("polish_time_s", 0.4))
+sample_cfg    = dyn.get("sample", {}) or {}
+temperature   = float(sample_cfg.get("temperature", 0.7))
+smooth_eps    = float(sample_cfg.get("smooth_eps", 1.0))
+
+
+Initialize timers before the outer loop:
+
+last_improve_t = time.time()
+restarts_done = 0
+
+
+Ensure improvement resets timer (inside your existing maybe_record(tour) or where global best updates):
+
+if L < best_len:
+    last_improve_t = time.time()
+
+
+Add a scout trigger after each outer cycle (after agents + integrator step):
+
+now = time.time()
+if scout_enabled and (now - last_improve_t) >= no_improve_s and restarts_done < max_restarts:
+    # EHM-biased restart + quick polish
+    scout = ehm.sample_tour(dist, candidate_adj, temperature=temperature, smooth_eps=smooth_eps)
+    scout = local_search_2opt(scout, dist, candidate_adj, kick_period=kick_period, time_budget_s=polish_time_s)
+    maybe_record(scout)
+    restarts_done += 1
+    last_improve_t = time.time()
+
+
+Update the sampler signature (backward-compatible):
+
+def sample_tour(self, dist, candidate_adj, temperature=0.7, smooth_eps=1.0):
+    # weights ~ ((count+smooth_eps)/cost)^(1/temperature); greedy sampling over candidate_adj
+    n = self.n
+    start = random.randrange(n)
+    used = [False]*n; used[start] = True
+    tour = [start]
+    for _ in range(n-1):
+        u = tour[-1]
+        cands = [v for v in candidate_adj.get(u, []) if not used[v]]
+        if not cands:
+            cands = [i for i in range(n) if not used[i]]
+        w = []
+        for v in cands:
+            key = (u,v) if u < v else (v,u)
+            cnt = self.counts.get(key, 0)
+            score = (cnt + smooth_eps) / (dist(u, v) + 1.0)
+            w.append(score ** (1.0 / max(1e-6, temperature)))
+        r = random.random() * sum(w); acc = 0.0; pick = cands[-1]
+        for v, wi in zip(cands, w):
+            acc += wi
+            if r <= acc:
+                pick = v; break
+        used[pick] = True
+        tour.append(pick)
+    return tour
+
+ACCEPTANCE CHECKS
+
+Builds and runs on eil51.tsp with your usual command; no behavior change with default metric_tsplib.yaml.
+
+Dynamic scout fires if you set no_improve_s very small (e.g., 1–2s) and max_restarts_per_seed=1; best length should occasionally improve after a scout.
+
+Metrics remain TSPLIB-correct (unchanged) for EUC_2D/ATT/GEO instances; your existing verify_edge_type.py still reports correct EDGE types.
+
+Context docs (Bee-Swarm architecture + EHM scouts / agent loop):

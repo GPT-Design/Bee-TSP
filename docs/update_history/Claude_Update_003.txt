@@ -1,0 +1,38 @@
+Interpret + targeted tweaks
+
+att48 (small): you’re close; a bit more exploitation helps.
+
+Raise k → 34–36, single global zone, keep 1.2 s agent time.
+
+Turn on Or-opt (cheap) before we consider any 3-opt budget.
+
+kroA100 / ch130 (small–mid): uniform outcomes = same basin every time.
+
+k → 32–34, increase kicks (shorter kick period), and enable dynamic scouts sooner (e.g., no_improve_s: 5).
+
+If available, try a stronger integrator step (EAX or a beefier POPMUSIC union) between cycles.
+
+Suggested next run (same harness)
+
+Keep 60 s, but push k + scouting a notch:
+
+python test_all_three_instances.py \
+  --config test_enhanced_config.yaml \
+  --time-budget 60 \
+  --seeds 42 123 456 789 999 \
+  --candidate-k 34 \
+  --agent-time 1.2 \
+  --scouts-stagnation 5 \
+  --max-restarts 3 \
+  --output all_three_comparison_results_v2.json
+
+
+(If you wire Or-opt, flip local_search.use_oropt: true in the YAML and re-run.)
+
+Minor notes
+
+optimal_from_file is null for att48—that’s fine; you still computed the true optimal length from the tour using the loader’s metric (ATT), which is what matters.
+
+Your tester prints the exact config it runs and embeds it in JSON—good for reproducibility.
+
+If you want, I can hand you a tiny patch to add Or-opt as a toggle (default off) so we can A/B it on att48/ch130 without touching anything else.

@@ -1,0 +1,133 @@
+RUN SHEET — Multi-Hive A/B (Large-N)
+
+Purpose
+Prove that the multi-hive policy improves time-to-useful quality on large Euclidean TSP vs a single-hive baseline under the same wall-clock.
+
+1) Success criteria (call the win)
+
+Primary: lower TTT@10% (time to reach ≤10% gap to opt/best-known) than single-hive at the same wall.
+
+Secondary: lower final gap at wall; steeper early anytime slope (gap drop/min).
+
+Must: parity OK (no negative gaps); clean TTT rules (opt uses ==, % targets use ≤ floor(Lopt*(1+ε/100))).
+
+2) Instances, budgets, seeds
+
+pr2392 → 600 s
+
+fnl4461 → 1,800 s
+
+pla33810 → 3,600–5,400 s (optional in this A/B; needs time)
+
+Seeds: 42 123 456 for all runs.
+Evaluation mode: workers=1; threads clamped to 1.
+
+3) Configs (what to run)
+
+Base preset (Large-N, both arms):
+
+Candidate graph: Delaunay ∪ k-NN, k = k_base + 4
+
+Integrator: POPMUSIC
+
+Agents/zone: 4
+
+Per-bee time: ~2–3 s
+
+Or-opt: OFF
+
+Recombination: OFF
+
+A (control): Single-hive
+
+Ensure solver.multi_hive.enabled = false.
+
+B (treatment): Multi-hive
+
+solver.multi_hive.enabled = true
+
+Epoch: 60 s
+
+Hives: H1 (Δk=0), H2 (Δk=+2), H3 (Δk=+4), H4 (corridor bias, Δk=+2), H5 (ring-breaker, Δk=+4; earlier Bee-Ball trigger)
+
+Allocator: bandit (UCB/Thompson), min slice 30 s
+
+Shared state: champion tour + EHM; no tour migration
+
+Use the same base YAML you’ve been using; flip only the multi-hive flags between A and B (and keep the Large-N preset identical).
+
+4) Environment prep (Windows PowerShell)
+
+From the repo root:
+
+$env:OMP_NUM_THREADS = "1"
+$env:OPENBLAS_NUM_THREADS = "1"
+$env:MKL_NUM_THREADS = "1"
+$env:NUMEXPR_NUM_THREADS = "1"
+
+5) Runs (same wall, same seeds)
+A) Single-hive control @ 600s / 1800s
+
+pr2392 600 s — tag: SH_pr2392_600
+
+fnl4461 1800 s — tag: SH_fnl4461_1800
+
+B) Multi-hive treatment @ 600s / 1800s
+
+pr2392 600 s — tag: MH_pr2392_600
+
+fnl4461 1800 s — tag: MH_fnl4461_1800
+
+(Optionally add pla33810 @ 3600–5400 s as MH_pla33810_3600.)
+
+Use your new CLI with timestamped outputs. Point both arms at the same base config; switch multi-hive on/off via your overlay/flags. Keep workers=1.
+
+6) What to capture (per instance)
+
+Final gap (%), TTT@10% (and @5% if reached), anytime slope over first 10 min.
+
+Improvements/min and accepts/min.
+
+For multi-hive: which hive produced the last ≥0.2% gain; allocator slice history per epoch.
+
+(If enabled) HK 1-tree bound / dual gap per epoch and any Bee-Ball triggers.
+
+Parity line once: opt_eval == best_known confirmation.
+
+Save artifacts in the run’s stamped results dir (JSON + log). Keep tags distinct (SH_* vs MH_*).
+
+7) Quick analysis checklist
+
+pr2392 @ 600 s: MH final gap ≤ SH final gap; ideally TTT@10% hit (or closer).
+
+fnl4461 @ 1,800 s: MH median gap ≤ 28–30% and ≤ SH; anytime slope in first 10 min steeper for MH.
+
+Stability: tight gap ranges across seeds; parity OK; no negative gaps.
+
+Attribution: on fnl4461, note whether H3 (Δk=+4) or H5 (ring-breaker) delivered the decisive improvement.
+
+8) Decision rules
+
+If MH beats SH on pr2392 and fnl4461 at identical walls → promote multi-hive to default for n ≳ 2k.
+
+If pr2392 ties but fnl4461 wins by ≥5–10% absolute → still promote for large-n; keep SH for small/mid.
+
+If results are mixed → keep SH default, keep MH as optional flag, and schedule one more MH run with epoch=90 s (reduces allocator overhead) before deciding.
+
+9) Notes / pitfalls
+
+Don’t change anything besides the MH flag between A and B.
+
+Keep workers=1 and threads=1 to avoid masking effects.
+
+If logs show very few improvements/min on fnl4461, try k knee check separately later (Δk=+6) — not in this A/B.
+
+10) Report snippet (fill after runs)
+Instance	Wall	SH final gap	SH TTT@10%	MH final gap	MH TTT@10%	Δgap (MH-SH)	Winner
+pr2392	600 s	…	…	…	…	…	…
+fnl4461	1800 s	…	…	…	…	…	…
+
+Anytime slope (first 10 min) — SH: … %/min, MH: … %/min
+Hive attribution (fnl4461): last ≥0.2% improvement by …
+
+That’s it. Run A and B exactly as above, drop the four numbers (final gaps + TTT@10%), and we’ll lock the large-n default.

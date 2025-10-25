@@ -1,0 +1,57 @@
+A) pla33810 — MH-Lite (to pair with your SH baseline)
+
+Walls: 3600 s and 5400 s
+
+# 3600 s
+bee-tsp run --instance pla33810 --wall 3600 --mode MH-Lite \
+  --seeds 42 123 456 --workers 1 --threads 1 \
+  --hives H1,H3 --epoch-s 120 --min-slice-s 60 \
+  --allocator ucb1 --improve-eps-pct 0.2 \
+  --merge-schedule mid,end --oropt-gate late \
+  --halo 0.15 --portals-per-node 5 --edge-cap 10
+
+# 5400 s
+bee-tsp run --instance pla33810 --wall 5400 --mode MH-Lite \
+  --seeds 42 123 456 --workers 1 --threads 1 \
+  --hives H1,H3 --epoch-s 120 --min-slice-s 60 \
+  --allocator ucb1 --improve-eps-pct 0.2 \
+  --merge-schedule mid,end --oropt-gate late \
+  --halo 0.15 --portals-per-node 5 --edge-cap 10
+
+B) pr2392 — SH and MH-Lite
+
+Walls: 600 s (primary) and 900 s (optional TTT@10% push)
+
+# SH
+bee-tsp run --instance pr2392 --wall 600 --mode SH \
+  --seeds 42 123 456 --workers 1 --threads 1 \
+  --merge-schedule mid,end --oropt-gate late \
+  --halo 0.10 --portals-per-node 5 --edge-cap 8
+
+# MH-Lite
+bee-tsp run --instance pr2392 --wall 600 --mode MH-Lite \
+  --seeds 42 123 456 --workers 1 --threads 1 \
+  --hives H1,H3 --epoch-s 120 --min-slice-s 60 \
+  --allocator ucb1 --improve-eps-pct 0.2 \
+  --merge-schedule mid,end --oropt-gate late \
+  --halo 0.10 --portals-per-node 5 --edge-cap 8
+
+# Optional 900 s (repeat both modes with --wall 900)
+
+C) fnl4461 — SH and MH-Lite
+
+Wall: 1800 s
+
+# SH
+bee-tsp run --instance fnl4461 --wall 1800 --mode SH \
+  --seeds 42 123 456 --workers 1 --threads 1 \
+  --merge-schedule mid,end --oropt-gate late \
+  --halo 0.10 --portals-per-node 5 --edge-cap 8
+
+# MH-Lite
+bee-tsp run --instance fnl4461 --wall 1800 --mode MH-Lite \
+  --seeds 42 123 456 --workers 1 --threads 1 \
+  --hives H1,H3 --epoch-s 120 --min-slice-s 60 \
+  --allocator ucb1 --improve-eps-pct 0.2 \
+  --merge-schedule mid,end --oropt-gate late \
+  --halo 0.10 --portals-per-node 5 --edge-cap 8

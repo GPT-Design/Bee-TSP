@@ -1,0 +1,35 @@
+Update_24.txt
+Title: Rollback to U22 + Metric Lock & Dual-Resum Sentinel
+Version: 2025-09-16
+Status: Approved
+Depends on: 15 (SSoT), 17 (Synthetic Safety), 20 (Standard Outputs), 22 (Sunset MH)
+
+0) Goal
+Resolve the pr2392@600s 417k→486k divergence by:
+  (a) Rolling production SH back to Update_22 defaults, and
+  (b) Enforcing a hard metric lock and a dual-resum sentinel so CEIL_2D vs EUC_2D drift cannot reoccur.
+
+1) Immediate production rollback (effective now)
+Preset = **U22 SH defaults**:
+  • Read metric tag from `<benchmarks/<instance>.tsp>` (TSPLIB `EDGE_WEIGHT_TYPE`)
+  • No U23 candidate caps/portals
+  • HK 1-tree OFF
+  • Initializers K=1 (near-zero budget)
+  • Or-opt gating as in U22
+  • POPMUSIC merges: mid & end only
+Keep all Update 15/17/20 guardrails (tour-first, TSPLIB integer SSoT, standard outputs).
+
+2) Metric lock (hard fail if inconsistent)
+At run start:
+  • Compute `metric_tag = EDGE_WEIGHT_TYPE(pr2392.tsp|fnl4461.tsp|pla33810.tsp)`  # EUC_2D/CEIL_2D/ATT/GEO
+  • Persist `metric_tag` into:
+      - run summary JSON (`<base>.json`)
+      - every `improve` event (field: `metric_tag`)
+      - manifest line (`"metric": "<EUC_2D|...>"`)
+  • Assert: any code path attempting to use a different metric must raise.
+
+Reference (controller init):
+```python
+metric_tag = read_tsplib_metric(f"benchmarks/{instance}.tsp")  # returns 'EUC_2D'|'CEIL_2D'|'ATT'|'GEO'
+log.info({"metric_tag": metric_tag})
+assert all_modules_agree(metric_tag)  # raise on mismatch

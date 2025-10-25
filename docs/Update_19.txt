@@ -1,0 +1,148 @@
+Update_19.txt
+Title: Log & Metrics Integrity (Long-Wall) — Time, NaNs, Gap%, Manifests
+Version: 2025-09-11
+Depends on: Update_15 (TSPLIB SSoT), Update_16R (short-wall), Update_17 (synthetic safety)
+Status: Approved
+
+0) Scope (what this fixes)
+- Wrong wall/elapsed time in summaries
+- NaN allocations/slices in epoch 1 logs
+- Nonsensical gap % (bad denominator / missing BK/OPT)
+- Seed/median aggregation ambiguities
+- Manifest completeness & post-run verification
+
+No search/heuristic behavior is changed.
+
+1) Timekeeping (single source of truth)
+1.1 Use a monotonic clock.
+    start_t = monotonic(); elapsed_s = monotonic() - start_t
+1.2 Always emit in summary:
+    { wall_s, elapsed_s, epochs_completed, epoch_s,
+      elapsed_from_epochs_s = epochs_completed * epoch_s }
+1.3 Sanity check (auto-fail logging):
+    abs(elapsed_s - min(wall_s, elapsed_from_epochs_s)) / wall_s ≤ 0.02
+    If violated → mark summary {time_integrity:"FAIL"} and raise.
+1.4 Set final:
+    total_time_s = min(elapsed_s, wall_s)
+
+2) Allocator init (no NaNs, ever)
+2.1 Epoch 0/1 initialization
+    allocations = {"H1":0,"H3":0} (or omit key) until UCB computes.
+    slice_s = 0 (or null) until computed; never NaN.
+2.2 Log rule:
+    Only log numeric allocations/slice after computation; else omit field.
+2.3 CI tripwire:
+    Reject any JSON event containing NaN/Infinity.
+
+3) Gap metrics (well-defined or null)
+3.1 Inputs:
+    best_known_int (BK) and optimal_int (OPT) are integers or null.
+3.2 Emit BOTH (when defined):
+    gap_to_best_pct = 100 * (best_len_int - BK) / BK
+    gap_to_opt_pct  = 100 * (best_len_int - OPT) / OPT
+3.3 If BK/OPT is unknown → set corresponding field = null (never fabricate).
+3.4 Clamp & validate:
+    Denominator must be >0; if not, log {gap_integrity:"FAIL"} and set null.
+3.5 Dual gap (HK 1-tree):
+    dual_gap_pct = 100 * (best_len_int - LB) / LB (LB>0 else null)
+
+4) Parity & acceptance (unchanged, restated)
+4.1 Tour-first acceptance; controller re-sums TSPLIB integer → single source of truth.
+4.2 Parity triad printed once/run.
+4.3 If .opt.tour exists and parity ≠ OK → abort run.
+
+5) Logging schema (additions & types)
+Every improve/reject:
+  {
+    "eval_source":"TSPLIB_INTEGER",
+    "controller_len_int": <int>,
+    "reported_len_raw": <int|null>,
+    "delta_ok": true|false
+  }
+Every epoch (diagnostics):
+  {
+    "time_breakdown": {"local_search":x,"merge":y,"allocator":z,"idle":w},
+    "cross_zone_pct": <float>,
+    "portal_removals_pre80": <int>,
+    "oropt_survival_pct": <float>,
+    "candidate_cap_violations": <int>,
+    "hk_dual_gap_pct": <float|null>,
+    "stall_flag": true|false,
+    "merge_event": "mid"|"end"|null
+  }
+Types must be numeric or null (never NaN/Inf/strings).
+
+6) Manifest line (required fields)
+Append one JSONL per accepted run:
+{
+  "instance": "<name>",
+  "metric": "<EUC_2D|CEIL_2D|ATT|GEO>",
+  "mode": "<SH|MH-Lite|MH-Full>",
+  "seed": <int>,
+  "wall_s": <int>,
+  "elapsed_s": <float>,
+  "epochs_completed": <int>,
+  "epoch_s": <int>,
+  "tour_path": "<abs or repo-rel path>",
+  "tour_sha256": "<hex>",
+  "length_tsplib": <int>,
+  "opt": <int|null>,
+  "best_known": <int|null>,
+  "parity": "<OK|FAIL|MATCH_BEST|NEQ_BEST>",
+  "ttt10_s": <int|null>,
+  "ttt5_s": <int|null>,
+  "early_slope": <float|null>,
+  "improvements_per_min": <float|null>,
+  "hive_attrib": "<H1|H3|…|null>",
+  "timestamp_utc": "<ISO8601>"
+}
+
+7) Aggregation rules (medians over seeds)
+7.1 A/B tables must be computed from identical seed sets.
+    If any seed missing → status "INCOMPLETE", skip median.
+7.2 Report medians and [P10,P90] where available.
+7.3 Never mix single-seed runs with medians in the same row.
+
+8) Validators (CI + tools)
+8.1 No-NaN validator: fail if any event contains NaN/Inf.
+8.2 Time plausibility: enforce §1.3.
+8.3 Gap plausibility:
+    If BK/OPT present and denominator ≤0 → fail.
+    If gap_to_best_pct > 1000 → warn; inspect BK.
+8.4 Artifact guard (post-run):
+    Re-sum every `tour_path` in manifest; verify SHA; length must match.
+8.5 Schema check: all manifest fields present with correct types.
+
+9) Retro-fix procedure (existing runs)
+9.1 Recompute elapsed_s from first/last event timestamps; recompute epochs_completed*epoch_s; set total_time_s per §1.4.
+9.2 Rewrite summary block & manifest with corrected times; set {audit:"Update_19_corrected"}.
+9.3 Re-verify tours; re-append manifest if SHA/length matches; keep originals under `results/_archive/`.
+
+10) Reference snippets (controller/log writer)
+
+# time
+start_t = time.monotonic()
+...
+elapsed_s = time.monotonic() - start_t
+total_time_s = min(elapsed_s, wall_s)
+
+# allocator init
+alloc = {}
+slices = {}
+# log only after compute; never log NaN
+
+# gaps
+def safe_gap(num, den):
+    return None if den is None or den <= 0 else 100.0 * (num - den) / den
+
+gap_to_best_pct = safe_gap(best_len_int, best_known_int)
+gap_to_opt_pct  = safe_gap(best_len_int, optimal_int)
+
+11) Promotion gates (unchanged)
+Short-wall gates (Update_16R) and long-wall gates remain as-is. This update only affects data correctness.
+
+12) Effective date & rollout
+- Immediate for all new runs.
+- Retro-fix existing pla33810 MH-Lite summaries/manifests before public comparison.
+
+End of file.

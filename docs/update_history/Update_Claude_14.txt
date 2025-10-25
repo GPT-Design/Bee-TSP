@@ -1,0 +1,134 @@
+Absolutely—have CC start writing **TSPLIB `.tour` files** alongside the JSON/MD so you can do the tri-sum and share artifacts cleanly. Here’s a tight, copy-pasteable update you can drop in `updates/Claude_Update_014.txt`.
+
+---
+
+# Claude\_Update\_014.txt — Export TSPLIB `.tour` Artifacts (+ hashes & manifest)
+
+## Goals
+
+1. For every run (single-hive and multi-hive), **emit a TSPLIB `.tour` file** for the final champion tour (and, optionally, checkpoints).
+2. Include **SHA256** of the tour, **TSPLIB integer** length, and **metric tag** in the JSON.
+3. Write a small **manifest.jsonl** row per run so verification is one command away.
+
+---
+
+## A) Output locations & naming (no ambiguity)
+
+* **Per instance (final champion):**
+  `results/<TAG>/<INSTANCE>/<INSTANCE>_<TAG>_champion.tour`
+
+* **Per seed (optional, if you already group by seed):**
+  `results/<TAG>/<INSTANCE>/seed_<SEED>/<INSTANCE>_<TAG>_seed<SEED>.tour`
+
+* **Checkpoint (optional; only keep last one):**
+  `results/<TAG>/<INSTANCE>/<INSTANCE>_<TAG>_epoch<NN>.tour`
+
+> Keep it simple to start: final **champion** only.
+
+---
+
+## B) TSPLIB TOUR file format (exact)
+
+Write plain text with 1-based IDs:
+
+```
+NAME: <INSTANCE>_<TAG>_champion
+TYPE: TOUR
+DIMENSION: <N>
+COMMENT: metric=<EUC_2D|CEIL_2D|ATT|GEO>, best_len=<INTEGER>, seed=<SEED>, wall_s=<SECONDS>, commit=<HASH>, date=<ISO8601>
+TOUR_SECTION
+<i1>
+<i2>
+...
+<iN>
+-1
+EOF
+```
+
+Rules:
+
+* **Indices are 1-based** (match the .tsp file).
+* Do **not** repeat the start node; the closing edge is implicit.
+* `best_len` must be the **TSPLIB integer** length used everywhere else.
+
+---
+
+## C) JSON enrichment (so tools can find the tour)
+
+In each run’s JSON summary, add:
+
+```json
+{
+  "tour_path": "results/<TAG>/<INSTANCE>/<INSTANCE>_<TAG>_champion.tour",
+  "tour_sha256": "<hex>",
+  "metric_tag": "<EUC_2D|CEIL_2D|ATT|GEO>",
+  "best_len": <int>,
+  "parity": "OK"
+}
+```
+
+Multi-hive: also record which hive produced the final improvement, e.g. `"final_hive": "H3"`.
+
+---
+
+## D) Manifest line (append once per run)
+
+Append one JSON line to:
+`results/<TAG>/<INSTANCE>/manifest.jsonl`
+
+```json
+{"instance":"<INSTANCE>","tag":"<TAG>","seed_set":[42,123,456],
+ "tour_path":"results/<TAG>/<INSTANCE>/<INSTANCE>_<TAG>_champion.tour",
+ "tour_sha256":"<hex>","metric_tag":"<EUC_2D>",
+ "best_len": <int>, "best_known": <int>,
+ "started":"<ISO8601>", "finished":"<ISO8601>", "commit":"<HASH>"}
+```
+
+---
+
+## E) When to write the `.tour`
+
+* **Always** write the **final champion** at end of run.
+* (Optional) When a **strict global improvement** occurs, update a single checkpoint file (overwrite same filename so you keep only the latest).
+
+---
+
+## F) Parity triad (single print; keep)
+
+On every run, print/log once:
+
+```
+[PARITY] instance=<INSTANCE> metric=<TAG> opt_eval_tsplib=<int|NA> best_known=<int> parity=<OK|FAIL>
+```
+
+Abort on **FAIL** when `.opt.tour` exists.
+
+---
+
+## G) Acceptance for Update 14
+
+For **pr2392** and **fnl4461** (latest tags):
+
+* `.tour` file exists at the specified path.
+* `tour_sha256` present in JSON and `manifest.jsonl`.
+* Re-summing the `.tour` with your existing verifier matches `best_len` exactly.
+* Parity line present; **OK**.
+* Multi-hive JSON shows `final_hive` attribution.
+
+---
+
+## H) Notes / scope
+
+* Do not change solver math or evaluation. This update is **export + bookkeeping only**.
+* Keep filenames short and deterministic; avoid spaces.
+* If disk size is a concern on very large instances, allow `*.tour.gz` via a config flag later—**not** required now.
+
+---
+
+### Why this matters
+
+* You can now do the **tri-sum** with zero friction (internal verifier, external tool, and a spreadsheet if needed).
+* Reviewers (and your future self) get a clean artifact + hash for each run.
+* If fnl4461 = **173,274** holds across tools, you’ve got a credible **new best-known candidate** with a reproducible package.
+
+---

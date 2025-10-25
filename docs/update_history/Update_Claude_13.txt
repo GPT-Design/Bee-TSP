@@ -1,0 +1,171 @@
+Claude_Update_013.txt — Multi-Hive A/B (TSPLIB-Aligned) + Best-Known Verification
+0) Context (what’s already fixed)
+
+Unicode/logging crash resolved; multi-hive passes unit + integration tests.
+
+Bridge complete: epoch loop → real solver → UCB1 rewards; champion updates wired.
+
+TSPLIB evaluation alignment restored (integer rounding on raw coords); no scale mismatch.
+
+Latest A/B signals:
+
+pr2392 @ 600s: Single-hive 422,428 vs Multi-hive 416,144 (≈ -1.5% better; gap ≈ 10.1% vs opt 378,032).
+
+fnl4461 @ 1800s: Multi-hive 173,274 (<< best-known 182,566) — candidate new best-known pending verification.
+
+1) Goals for this update
+
+Lock parity and logging so every A/B is indisputably comparable.
+
+Finish the A/B pair (same walls, same seeds) and report TTT@10% + final gaps.
+
+Verify the fnl4461 173,274 tour as a new best-known (or demote if checks fail).
+
+Promote the Large-N preset + Multi-Hive for n ≳ 2k (config-gated).
+
+Produce a succinct report + leaderboard lines.
+
+2) Hard requirements (must implement)
+A) Parity triad (printed once per run)
+
+Emit a single line (or JSON event) that includes:
+
+instance, metric_tag (EUC_2D / CEIL_2D / ATT / GEO),
+
+opt_eval_tsplib (re-sum .opt.tour if available),
+
+best_known (from benchmarks table),
+
+assert opt_eval_tsplib == best_known when .opt.tour exists; if false → abort run with a clear error.
+
+B) Single eval path everywhere
+
+All lengths (solver best, champion, rewards, summaries, TTT checks, HK bound dual-gap) must use the same TSPLIB integer evaluation on raw coordinates.
+
+Rewards for UCB1 = relative gap drop per second computed from integer lengths.
+
+C) Logging (minimal but sufficient)
+
+Append JSONL events (seconds since run start):
+
+run_start (instance, seeds, wall, epoch_s, hives, metric_tag)
+
+hive_start (hive id, slice_s, profile: Δk, bias, bee_ball_boost)
+
+improve (hive id, new_len, delta_len, gap_pct)
+
+alloc (epoch, time slices by hive)
+
+hk_bound (lb_value, dual_gap_pct)
+
+summary (per-hive time/accepted/best_len; global best_len; total_time_s)
+
+D) TTT rules (enforce)
+
+TTT@opt hits only on exact equality (best == opt).
+
+TTT@ε% hits when best ≤ floor(opt*(1+ε/100)).
+
+Never count best < best_known as success (that’s a parity FAIL).
+
+3) A/B run matrix (same walls, same seeds)
+
+Evaluation mode: workers=1, BLAS/OpenMP threads=1, seeds = 42 123 456.
+
+Preset for both arms (Large-N stable):
+
+Candidate graph: Delaunay ∪ k-NN, k = k_base + 4.
+
+Integrator: POPMUSIC (recombination OFF).
+
+Agents per zone: 4.
+
+Per-bee time: ~2 s.
+
+Or-opt OFF.
+
+Arms
+
+A — Single-hive control: multi_hive.enabled = false.
+
+B — Multi-hive treatment: multi_hive.enabled = true, epoch = 60 s, hives = H1(Δk=0), H2(+2), H3(+4), H4(corridor,+2), H5(ring-breaker,+4), UCB1 allocator (min slice 30 s).
+
+Instances & walls
+
+pr2392: 600 s (A and B).
+
+fnl4461: 1,800 s (A and B).
+
+(Optional after A/B: pr2392 @ 900 s to reach TTT@10%; pla33810 @ 3,600–5,400 s for milestone tracking.)
+
+4) fnl4461 “new best-known” verification protocol (173,274)
+
+Mark as candidate only after all checks pass:
+
+Tri-resum the tour under the TSPLIB integer path (three independent code paths in our repo). All must output 173,274.
+
+Permutation sanity: length-N tour, each node exactly once, includes the closing edge.
+
+Metric audit: run prints metric_tag = EUC_2D and the parity triad shows a valid .opt.tour is not available; compare against best_known 182,566 (not opt).
+
+Replication: rerun with the same seeds → identical result; and with one different seed → within a small tolerance or repeatable equal (depending on determinism).
+
+Artifacts to store:
+
+.tour file (node sequence), .json result, log, config (resolved params), commit hash, seeds, wall, and SHA256 of the tour file.
+
+Benchmarks table update: only after 1–5 pass, prepare a PR that proposes best_known = 173,274 for fnl4461 (with a link to artifacts and log).
+
+If any check fails → do not update best_known; log as an internal anomaly and investigate.
+
+5) Deliverables (what to produce in this update)
+
+A/B tables (TSPLIB-aligned):
+
+pr2392 @ 600 s: SH length, MH length, Δ% (MH-SH), TTT@10% (hit/NA), anytime slope (gap drop/min, first 10 min).
+
+fnl4461 @ 1,800 s: SH vs MH same fields.
+
+Multi-hive attribution:
+
+For each instance, list which hive id produced the final ≥0.2% improvement and a count of improvements by hive.
+
+Parity & bounds lines:
+
+One “parity triad” line per run.
+
+Epoch-wise hk_bound and dual_gap_pct once per epoch (brief).
+
+Report & leaderboard:
+
+Append to docs/reports/<tag>/report.md the A/B tables above.
+
+Update docs/leaderboard.md with pr2392 (600 s; and 900 s if run) and fnl4461 (1,800 s). Flag fnl4461 as candidate new best-known pending verification.
+
+Release note stub (CHANGELOG):
+
+“Multi-hive improves pr2392 by ~1.5% at 600 s; fnl4461 candidate new best-known 173,274 (verification in progress).”
+
+6) Guardrails / scope limits
+
+Do not enable Or-opt or recombination for these runs.
+
+Keep workers=1, threads=1 (avoid masking allocator effects).
+
+Multi-hive features remain config-gated; default single-hive behavior preserved when disabled.
+
+If any run prints best < best_known, mark parity=FAIL and abort the comparison.
+
+7) Acceptance criteria for Update 13
+
+A/B completed for both pr2392@600 s and fnl4461@1,800 s with aligned TSPLIB metrics and full logs.
+
+pr2392: MH ≤ SH; pr2392 @ 900 s scheduled if within 0.5% of TTT@10%.
+
+fnl4461: MH result 173,274 passes all verification steps (or is clearly demoted if any check fails).
+
+Report & leaderboard updated; artifacts (tour, config, logs, hashes) stored.
+
+No parity FAILs in final accepted results.
+
+End — Update 13

@@ -1,0 +1,140 @@
+Update_17.txt
+Title: Synthetic/Mock Safety & Verification Hardening
+Version: 2025-09-10
+Depends on: Update_15 (TSPLIB-integer SSoT), Update_16R (short-wall policy)
+Status: Approved
+
+0) Purpose
+Eliminate synthetic/mock evaluation paths from production runs and prevent their reintroduction. Make TSPLIB-integer tour re-sum the only authority for lengths across controller, allocator, bounds, logs, and metrics. Add static checks, runtime tripwires, and artifact verification.
+
+1) Terms & threat model
+- Synthetic evaluator: any non-TSPLIB integer evaluator (scaled/normalized/float/“fast eval”).
+- Mock/stub/dummy/test eval: any code that simulates results or bypasses real tour re-sum.
+Threats: false improvements, poisoned allocator signals, invalid TTT, bad papers.
+
+2) Non-negotiables (production)
+- SINGLE SOURCE OF TRUTH: controller must re-sum length from the candidate `.tour` using the TSPLIB integer evaluator (EUC_2D/CEIL_2D/ATT/GEO) before any decision.
+- TOUR-FIRST ACCEPTANCE: no tour → no improvement. Reported lengths are ignored.
+- METRICS ALIGNMENT: champion, rewards, UCB Δgap/sec, HK bound/dual gap, TTT, logs all use the controller’s integer length only.
+- PARITY TRIAD: print once/run; if `.opt.tour` exists and parity ≠ OK → abort run.
+
+3) Environment gates (default ON)
+Set in shells/CI runners:
+  STRICT_TSPLIB_EVAL=1
+  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+Policy: when STRICT_TSPLIB_EVAL=1, any synthetic/normalized/float evaluator import or call MUST raise with a clear error.
+
+4) Controller invariants (reference behavior)
+function ACCEPT_IF_TOUR_AND_TSPLIB_IMPROVES(tour, coords, metric):
+  L = TSPLIB_Integer_Resum(tour, coords, metric)
+  if L < champion_len:
+     update_champion(L, tour)
+     log_improve(len_src="TSPLIB_INTEGER", controller_len_int=L)
+     append_manifest(...)
+     return ACCEPT
+  else:
+     log_reject("no integer improvement", reported_len_raw=?, controller_len_int=L)
+     return REJECT
+
+5) Repo hygiene (code layout & imports)
+- Production code lives under: bee_tsp/, scripts/, configs/, benchmarks/, tools/.
+- Test/mocks live under: tests/ ONLY. Never import tests/ from production.
+- Disallow production-side symbols named: synthetic, mock, dummy, stub, normalized, scaled,
+  approx, float_len, fast_eval, toy, test_eval, sampled_len (case-insensitive).
+
+6) Static checks (pre-commit & CI)
+Run both locally and in CI. Any hit ⇒ fail.
+- Banned strings scan (ripgrep):
+  rg -nEi 'synthetic|mock|dummy|stub|normalized|scaled|approx|float_len|fast_eval|toy|test_eval|sampled_len|fake' bee_tsp
+- Boundary bloat guard (config/code):
+  rg -nEi 'edge[_-]?cap\s*:\s*(1[1-9]|[2-9]\d)|halo(_pct)?\s*:\s*0\.(2[1-9]|[3-9]\d)|portals[_-]?per[_-]?node\s*:\s*([89]|\d{2,})' configs bee_tsp
+
+7) Runtime tripwires (unit/integration tests)
+- Tripwire: with STRICT_TSPLIB_EVAL=1, importing or calling any synthetic evaluator raises.
+- Controller test: reported≠integer ⇒ REJECT + log delta (both numbers).
+- Allocator test: UCB uses only controller_len_int deltas (asserted).
+- Parity test: when `.opt.tour` is present and parity ≠ OK ⇒ abort.
+
+8) Logging (paranoia fields)
+In every improve/reject event, include:
+  eval_source="TSPLIB_INTEGER"
+  controller_len_int=<int>
+  reported_len_raw=<int|null>
+  delta_ok=<true|false>
+Keep time breakdown per epoch: {local_search, merge, allocator, idle}. Track: cross_zone_pct, portal_removals_pre80, oropt_survival_pct, candidate_cap_violations, hk_dual_gap, stall_flags, merge_events.
+
+9) Artifacts (required per accepted run)
+- `.tour` (1-based TSPLIB), SHA256, manifest.jsonl, run JSON, logs.
+- Parity triad printed once/run.
+- TTT rules: hit when best_int ≤ floor(opt*(1+ε/100)).
+
+10) Post-run artifact verification (automated)
+Verify every accepted tour with the canonical verifier:
+  python verify_tsplib_tour.py --tsp <instance>.tsp \
+    --tour <tour> --metric <tag> --manifest <manifest.jsonl>
+CI must re-sum and re-hash all `.tour` files referenced in manifest.jsonl and **fail** on any mismatch.
+
+11) Kill-switch criteria (invalidate results)
+- Any delta_ok=false ⇒ invalidate section/run.
+- Any parity FAIL with `.opt.tour` present ⇒ abort run.
+- Missing `.tour` or SHA256 ⇒ result not counted.
+
+12) Red-team drills (quarterly or before big runs)
+- Fake win injection: bridge reports +1% without changing tour ⇒ controller rejects and logs.
+- Tour tamper: swap two city indices ⇒ verifier catches parity or length mismatch.
+- Env off attempt: STRICT_TSPLIB_EVAL unset ⇒ CI policy check fails the job.
+
+13) CI recipes (ready to paste)
+# 13.1 Pre-commit (snippet)
+#!/usr/bin/env bash
+set -euo pipefail
+if rg -nEi 'synthetic|mock|dummy|stub|normalized|scaled|approx|float_len|fast_eval|toy|test_eval|sampled_len|fake' bee_tsp; then
+  echo "❌ BANNED TERM DETECTED"; exit 1; fi
+
+# 13.2 Artifact guard (call after each batch)
+python tools/artifact_guard.py --manifest results/*/manifest.jsonl --tsp-root benchmarks
+
+14) Tools (drop-in)
+- verify_tsplib_tour.py (canonical tour re-sum; already in tools/).
+- tools/artifact_guard.py (reference implementation below).
+
+Appendix A — tools/artifact_guard.py (reference)
+------------------------------------------------
+#!/usr/bin/env python3
+import argparse, json, os, sys, hashlib
+from pathlib import Path
+from verify_tsplib_tour import parse_tsp, parse_tour, compute_length
+
+def sha256(p):
+  h=hashlib.sha256(); h.update(Path(p).read_bytes()); return h.hexdigest()
+
+def main():
+  ap=argparse.ArgumentParser()
+  ap.add_argument("--manifest", nargs="+", required=True)
+  ap.add_argument("--tsp-root", required=True)
+  args=ap.parse_args()
+  errs=0
+  for m in args.manifest:
+    for line in Path(m).read_text().splitlines():
+      rec=json.loads(line)
+      tsp=Path(args.tsp_root)/f"{rec['instance']}.tsp"
+      tour=Path(rec["tour_path"])
+      if rec.get("tour_sha256")!=sha256(tour):
+        print(f"[SHA FAIL] {tour}", file=sys.stderr); errs+=1; continue
+      tspd=parse_tsp(str(tsp)); tour_idx=parse_tour(str(tour), tspd["dimension"])
+      L=compute_length(tspd["coords"], tour_idx, rec["metric"])
+      if int(rec["length_tsplib"])!=int(L):
+        print(f"[LEN FAIL] {tour}: manifest={rec['length_tsplib']} recompute={L}", file=sys.stderr); errs+=1
+  if errs: sys.exit(1)
+if __name__=="__main__": main()
+------------------------------------------------
+
+Appendix B — CC coding rules (to paste in dev notes)
+----------------------------------------------------
+- Never read “scores” from bridges/miners. Bridges must emit tours (or edit-sets) only.
+- Call TSPLIB integer re-sum in the controller for every candidate tour.
+- Log eval_source="TSPLIB_INTEGER" and controller_len_int for all improvements.
+- Unit tests MUST fail if STRICT_TSPLIB_EVAL=1 and any synthetic evaluator is imported/called.
+- Do not import tests/ from production code. Keep mocks inside tests/ only.
+
+End of file.

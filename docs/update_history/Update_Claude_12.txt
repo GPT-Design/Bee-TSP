@@ -1,0 +1,53 @@
+You’re right to flag it—those 10× smaller “best” lengths (46,493 on pr2392; 37,943 on fnl4461) scream evaluation path mismatch. Multi-hive is almost certainly summing on normalized coords / synthetic scale, while single-hive uses the TSPLIB integer metric. The controller looks fine (epochs, UCB1, hive diversity) — it’s the units that broke your A/B.
+
+What I think happened
+
+In multi-hive, the solver (or logger) is using the feature-normalized coordinates (centered + RMS/divided) or a synthetic loader’s scale to compute/record best_len.
+
+Single-hive is using the raw TSPLIB metric (EUC/ATT/CEIL with integer rounding).
+
+Result: same tour quality, totally different units → multi-hive numbers ~4–10× smaller, “beating opt” by nonsense factors.
+
+Fix order (no code here—just what to do)
+
+Lock a single eval source for both arms.
+Every place you compute or log a tour length (solver return, champion, summary, TTT), force it to use the same `TSPLIB integer** evaluation on the raw coordinates**. Features/normalized coords are for SST only—not for distance.
+
+Add a parity triad to both arms (once per run):
+
+opt_eval_tsplib (re-sum the .opt.tour under the active eval path)
+
+champ_eval_tsplib (current champion under the same path)
+
+metric_tag (EUC_2D / CEIL_2D / ATT)
+They must print opt_eval_tsplib == best_known. If not, stop: wrong path.
+
+Rescore a multi-hive tour with the single-hive eval.
+Take the final MH tour and rescore it with the single-hive evaluation. If it jumps from ~46k to ~4.2e5, you’ve confirmed the mismatch.
+
+Reward uses integers too.
+UCB1 reward should be computed from integer lengths (Δgap/sec from champion) so allocator decisions aren’t scale-dependent.
+
+Bounds in the same units.
+HK 1-tree lower bound (even the sparse/approx one) must be in the same integer units; otherwise dual-gap is meaningless.
+
+Re-run the A/B exactly as before (same seeds, walls):
+
+pr2392 @ 600s (SH vs MH)
+
+fnl4461 @ 1800s (SH vs MH)
+Expect both arms to report lengths ~4.2e5 (pr2392) and ~2.2e5 (fnl4461) order-of-magnitude, with MH ≤ SH.
+
+Quick sanity tells (before you rerun)
+
+If the scale ratio ≈ best_known / MH_best_len differs per instance (≈8.1 for pr2392; ≈4.8 for fnl4461), that’s classic per-instance normalization leakage (RMS or bbox) being used in eval/logging.
+
+If the ratio were constant across instances, it’d point to a global unit conversion.
+
+After the fix
+
+Keep logging “which hive delivered the last ≥0.2% gain” — that analysis you posted (H2/H5/H3 contributions) is great.
+
+With units aligned, your earlier MH wins (11.7% on pr2392; ~25% on fnl4461) should hold or improve, and the A/B will be publishable.
+
+Bottom line: your multi-hive engine is behaving; the A/B was invalidated by mixed units. Align both arms to the TSPLIB integer path, print the parity triad once, and rerun—then we can lock MH as the large-N default.
