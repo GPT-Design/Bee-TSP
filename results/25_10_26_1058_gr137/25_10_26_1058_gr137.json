@@ -1,0 +1,19 @@
+{
+  "instance": "gr137",
+  "timestamp": "2025-10-26T10:58:12.243105+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\gr137.tsp",
+  "wall_time_s": 180,
+  "seed_results": [
+    {
+      "seed": 999,
+      "best_length": 70557.0,
+      "runtime": 180.30691385269165,
+      "anytime_count": 11
+    }
+  ],
+  "best_overall": 70557.0,
+  "worst_overall": 70557.0,
+  "avg_runtime": 180.30691385269165,
+  "total_seeds": 1
+}

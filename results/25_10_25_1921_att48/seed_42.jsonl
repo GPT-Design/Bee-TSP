@@ -1,0 +1,9 @@
+{"seed": 42, "event": "improve", "t": 0.07356429100036621, "best": 11155.0}
+{"seed": 42, "event": "improve", "t": 0.2027578353881836, "best": 10851.0}
+{"seed": 42, "event": "improve", "t": 0.5743796825408936, "best": 10801.0}
+{"seed": 42, "event": "improve", "t": 1.0502839088439941, "best": 10737.0}
+{"seed": 42, "event": "improve", "t": 2.500758647918701, "best": 10698.0}
+{"seed": 42, "event": "improve", "t": 11.784712791442871, "best": 10688.0}
+{"seed": 42, "event": "improve", "t": 13.238694190979004, "best": 10684.0}
+{"seed": 42, "event": "improve", "t": 26.33723211288452, "best": 10636.0}
+{"seed": 42, "event": "summary", "best": 10636.0, "runtime": 30.09298586845398}

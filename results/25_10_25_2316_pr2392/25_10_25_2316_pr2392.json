@@ -1,0 +1,19 @@
+{
+  "instance": "pr2392",
+  "timestamp": "2025-10-25T23:16:13.231303+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\pr2392.tsp",
+  "wall_time_s": 60,
+  "seed_results": [
+    {
+      "seed": 999,
+      "best_length": 378083.0,
+      "runtime": 134.37499046325684,
+      "anytime_count": 1
+    }
+  ],
+  "best_overall": 378083.0,
+  "worst_overall": 378083.0,
+  "avg_runtime": 134.37499046325684,
+  "total_seeds": 1
+}

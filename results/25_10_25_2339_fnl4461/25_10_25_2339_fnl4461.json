@@ -1,0 +1,19 @@
+{
+  "instance": "fnl4461",
+  "timestamp": "2025-10-25T23:39:57.913429+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\fnl4461.tsp",
+  "wall_time_s": 180,
+  "seed_results": [
+    {
+      "seed": 999,
+      "best_length": 224068.0,
+      "runtime": 523.0730090141296,
+      "anytime_count": 1
+    }
+  ],
+  "best_overall": 224068.0,
+  "worst_overall": 224068.0,
+  "avg_runtime": 523.0730090141296,
+  "total_seeds": 1
+}

@@ -1,0 +1,19 @@
+{
+  "instance": "att48",
+  "timestamp": "2025-10-25T23:37:59.217026+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\att48.tsp",
+  "wall_time_s": 60,
+  "seed_results": [
+    {
+      "seed": 999,
+      "best_length": 10628.0,
+      "runtime": 60.05500340461731,
+      "anytime_count": 12
+    }
+  ],
+  "best_overall": 10628.0,
+  "worst_overall": 10628.0,
+  "avg_runtime": 60.05500340461731,
+  "total_seeds": 1
+}

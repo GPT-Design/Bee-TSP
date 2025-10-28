@@ -1,0 +1,5 @@
+{"seed": 999, "event": "improve", "t": 46.878403663635254, "best": 470024.0}
+{"seed": 999, "event": "improve", "t": 73.01688194274902, "best": 460261.0}
+{"seed": 999, "event": "improve", "t": 125.56689262390137, "best": 457534.0}
+{"seed": 999, "event": "improve", "t": 191.94973468780518, "best": 455539.0}
+{"seed": 999, "event": "summary", "best": 455539.0, "runtime": 191.97402000427246}

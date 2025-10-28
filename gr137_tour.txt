@@ -1,0 +1,100 @@
+[AUTO_PARAMS] Auto-selected initializer mix for n=137, metric=GEO: ['nn', 'nearest_ins', 'nn', 'nearest_ins', 'nn', 'nearest_ins']
+[DEBUG] K value: 6
+[INTEGRATOR] Using eax with config: {'parents_per_round': 4, 'offspring_per_round': 2, 'repair_time_ms': 300, 'max_ab_cycles': 10}
+[INIT] Building 6 tours with budget 15.0s
+[INIT] Tour 1/6, elapsed: 0.00s
+[INIT] Using heuristic: nn
+[INIT] Built tour with length: 65075
+[INIT] Tour 2/6, elapsed: 0.01s
+[INIT] Using heuristic: nearest_ins
+[NEAREST_INS] n=137
+[NEAREST_INS] Nearest to 0 is 1
+[NEAREST_INS] Tour after nearest: [0, 1]
+[NEAREST_INS] Farthest node is 16, adding to tour
+[NEAREST_INS] Initial 3-node tour: [0, 1, 16], length 3
+[NEAREST_INS] Starting main insertion loop...
+[NEAREST_INS] Iteration 100, tour length: 102/137
+[INIT] Built tour with length: 61199
+[INIT] Tour 3/6, elapsed: 0.45s
+[INIT] Using heuristic: nn
+[INIT] Built tour with length: 64156
+[INIT] Tour 4/6, elapsed: 0.45s
+[INIT] Using heuristic: nearest_ins
+[NEAREST_INS] n=137
+[NEAREST_INS] Nearest to 0 is 1
+[NEAREST_INS] Tour after nearest: [0, 1]
+[NEAREST_INS] Farthest node is 16, adding to tour
+[NEAREST_INS] Initial 3-node tour: [0, 1, 16], length 3
+[NEAREST_INS] Starting main insertion loop...
+[NEAREST_INS] Iteration 100, tour length: 102/137
+[INIT] Built tour with length: 61199
+[INIT] Tour 5/6, elapsed: 0.91s
+[INIT] Using heuristic: nn
+[INIT] Built tour with length: 68834
+[INIT] Tour 6/6, elapsed: 0.91s
+[INIT] Using heuristic: nearest_ins
+[NEAREST_INS] n=137
+[NEAREST_INS] Nearest to 0 is 1
+[NEAREST_INS] Tour after nearest: [0, 1]
+[NEAREST_INS] Farthest node is 16, adding to tour
+[NEAREST_INS] Initial 3-node tour: [0, 1, 16], length 3
+[NEAREST_INS] Starting main insertion loop...
+[NEAREST_INS] Iteration 100, tour length: 102/137
+[INIT] Built tour with length: 61199
+[EAX] Called with pool size: 11
+[EAX] Parent lengths: [52722, 52748, 52972]
+[EAX] Best offspring: 53175
+[EAX] Called with pool size: 16
+[EAX] Parent lengths: [52678, 52722, 52748]
+[EAX] Best offspring: 54574
+[EAX] Called with pool size: 21
+[EAX] Parent lengths: [51869, 52622, 52678]
+[EAX] Best offspring: 53393
+[EAX] Called with pool size: 27
+[EAX] Parent lengths: [51745, 51810, 51869]
+[EAX] Best offspring: 51764
+[EAX] Called with pool size: 31
+[EAX] Parent lengths: [51745, 51764, 51810]
+[EAX] Best offspring: 52196
+[EAX] Called with pool size: 37
+[EAX] Parent lengths: [51556, 51745, 51764]
+[EAX] Best offspring: 55094
+[EAX] Called with pool size: 40
+[EAX] Parent lengths: [51386, 51402, 51556]
+[EAX] Best offspring: 53052
+[EAX] Called with pool size: 46
+[EAX] Parent lengths: [51386, 51402, 51556]
+[EAX] Best offspring: 53851
+[EAX] Called with pool size: 30
+[EAX] Parent lengths: [51386, 51386, 51402]
+[EAX] Best offspring: 53316
+[EAX] Called with pool size: 37
+[EAX] Parent lengths: [51386, 51386, 51402]
+[EAX] Best offspring: 55604
+[EAX] Called with pool size: 40
+[EAX] Parent lengths: [51321, 51386, 51386]
+[EAX] Best offspring: 57519
+[EAX] Called with pool size: 44
+[EAX] Parent lengths: [51273, 51321, 51386]
+[EAX] Best offspring: 52666
+[EAX] Called with pool size: 50
+[EAX] Parent lengths: [51273, 51321, 51380]
+[EAX] Best offspring: 54238
+[EAX] Called with pool size: 50
+[EAX] Parent lengths: [51273, 51321, 51380]
+[EAX] Best offspring: 52666
+[EAX] Called with pool size: 30
+[EAX] Parent lengths: [51200, 51273, 51321]
+[EAX] Best offspring: 59903
+[EAX] Called with pool size: 34
+[EAX] Parent lengths: [50998, 51200, 51273]
+[EAX] Best offspring: 52541
+[EAX] Called with pool size: 35
+[EAX] Parent lengths: [50998, 51200, 51273]
+[EAX] Best offspring: 55472
+[gr137] seed=999 best=50998.0 time=60.6s  -> results\25_10_26_1043_gr137\seed_999.jsonl
+[gr137] Writing 1 entries to global manifest...
+[gr137] Manifest entries written to: results\manifest.jsonl
+[gr137] Summary saved to: results\25_10_26_1043_gr137\25_10_26_1043_gr137.json
+[gr137] Config saved to: results\25_10_26_1043_gr137\25_10_26_1043_gr137.yaml
+[gr137] Run directory: results\25_10_26_1043_gr137

@@ -1,0 +1,61 @@
+{
+  "instance": "pr2392",
+  "timestamp": "2025-10-22T22:02:49.985088+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\pr2392.tsp",
+  "wall_time_s": 180,
+  "seed_results": [
+    {
+      "seed": 42,
+      "best_length": 405260.0,
+      "runtime": 180.9868471622467,
+      "anytime_count": 3
+    },
+    {
+      "seed": 43,
+      "best_length": 403666.0,
+      "runtime": 182.0217990875244,
+      "anytime_count": 5
+    },
+    {
+      "seed": 44,
+      "best_length": 399890.0,
+      "runtime": 181.6177680492401,
+      "anytime_count": 6
+    },
+    {
+      "seed": 45,
+      "best_length": 399807.0,
+      "runtime": 180.19824051856995,
+      "anytime_count": 6
+    },
+    {
+      "seed": 46,
+      "best_length": 403472.0,
+      "runtime": 182.2069866657257,
+      "anytime_count": 4
+    },
+    {
+      "seed": 999,
+      "best_length": 390969.0,
+      "runtime": 181.36821746826172,
+      "anytime_count": 6
+    },
+    {
+      "seed": 1000,
+      "best_length": 403472.0,
+      "runtime": 182.3362579345703,
+      "anytime_count": 7
+    },
+    {
+      "seed": 1001,
+      "best_length": 400451.0,
+      "runtime": 181.87111806869507,
+      "anytime_count": 3
+    }
+  ],
+  "best_overall": 390969.0,
+  "worst_overall": 405260.0,
+  "avg_runtime": 181.57590436935425,
+  "total_seeds": 8
+}
