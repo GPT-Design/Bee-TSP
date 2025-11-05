@@ -1,0 +1,7 @@
+numpy>=1.24
+scipy>=1.10
+PyYAML>=6.0
+# For Py<3.9 or Windows timezones:
+tzdata>=2024.1
+# If you ever end up using backport explicitly:
+backports.zoneinfo; python_version < "3.9"

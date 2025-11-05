@@ -1,0 +1,22 @@
+{
+  "instance": "att48",
+  "timestamp": "2025-11-03T21:10:38.541454+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\att48.tsp",
+  "wall_time_s": 60,
+  "seed_results": [
+    {
+      "seed": 42,
+      "best_length": 10628,
+      "runtime": 60.088510036468506,
+      "anytime_count": 9,
+      "tour_path": "results\\25_11_03_2110_att48\\seed_42_25_11_03_2110.tour",
+      "tour_sha256": "ef917d86421e30c045ebafc6cda7c2a74901fb64a32a22ca82c2d66bbacfe346",
+      "metric": "ATT"
+    }
+  ],
+  "best_overall": 10628,
+  "worst_overall": 10628,
+  "avg_runtime": 60.088510036468506,
+  "total_seeds": 1
+}

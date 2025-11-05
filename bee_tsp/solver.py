@@ -1,31 +1,65 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from turtle import st
-from typing import Any, Dict, List, Tuple, Optional
+
+# --- stdlib ---
 import random, time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple, Optional
+
+# --- project locals (hard deps for Mark 1) ---
+from bee_tsp.tsplib import load_tsplib
 from bee_tsp.distance import Distance
 from bee_tsp.initializers import build_initial_tours
 
+# --- optional integrators (guarded) ---
 try:
-    import numpy as np
+    from bee_tsp.integrators.ucr import ucr_integrate as _ucr_integrate
+    _HAS_UCR = True
 except Exception:
-    np = None
+    _ucr_integrate = None  # type: ignore
+    _HAS_UCR = False
 
+# --- optional adaptive module (guarded) ---
 try:
-    from scipy.spatial import cKDTree as KDTree
+    import bee_tsp.adaptive as _adaptive_mod  # noqa: F401 (may be unused until Mark 2)
+    _HAS_ADAPTIVE = True
+except Exception:
+    _adaptive_mod = None  # type: ignore
+    _HAS_ADAPTIVE = False
+
+# --- optional features (guarded) ---
+try:
+    from bee_tsp.features import compute_features as _compute_features
+    _HAS_FEATURES = True
+except Exception:
+    _compute_features = None  # type: ignore
+    _HAS_FEATURES = False
+
+# --- optional numeric backends (guarded) ---
+try:
+    import numpy as np  # noqa: F401
+except Exception:
+    np = None  # type: ignore
+
+# --- optional: KDTree (scipy) with alias + fallback ---
+try:
+    from scipy.spatial import cKDTree as _CKDTREE
+    KDTree = _CKDTREE  # runtime alias so references to KDTree resolve
     _HAS_KDTREE = True
 except Exception:
+    KDTree = None      # type: ignore
     _HAS_KDTREE = False
 
-from .tsplib import load_tsplib
-
 try:
-    from .features import compute_features
-    _HAS_FEATURES = True
-except ImportError:
-    _HAS_FEATURES = False
-    compute_features = None
+    from scipy import spatial as _spatial  # noqa: F401
+    _HAS_SCIPY = True
+except Exception:
+    _spatial = None  # type: ignore
+    _HAS_SCIPY = False
 
+# add this to silence “not accessed” without functional impact:
+_HAS_SCIPY = bool(_HAS_SCIPY)  # no-op to mark access
+
+# ---- module-level constants (safe to keep near the top) ----
 INF = 10**18
 
 class EdgeHistogram:
@@ -196,7 +230,6 @@ def double_bridge_kick(tour: List[int], pos: Optional[List[int]] = None):
         for i,v in enumerate(tour): pos[v] = i
 
 # ---------- Candidates ----------
-
 def build_knn_candidates(coords: Optional[List[Tuple[float,float]]], n: int, dist, k: int) -> Dict[int, List[int]]:
     adj = {i: [] for i in range(n)}
     if coords is not None and _HAS_KDTREE and np is not None:
@@ -343,60 +376,67 @@ class BeeTSPSolver:
         ins = load_tsplib(instance_path)
         n, coords = ins['n'], ins.get('coords', None)
 
-        # METRIC LOCK: Use metric_tag from config if provided (Update_24R fix)
+        # ---------- METRIC LOCK (Update_24R) ----------
+        # Read TSPLIB tag and normalize a few aliases.
+        tsplib_metric = str(ins.get("edge_weight_type", "EUC_2D")).upper()
+        if tsplib_metric in ("EUC", "EUC2D"):
+            tsplib_metric = "EUC_2D"
+        elif tsplib_metric == "GEO_2D":
+            tsplib_metric = "GEO"
+
+        # Allow config to enforce a metric, if provided.
         config_metric = self.cfg.get("metric_tag")
         if config_metric:
-            print(f"[METRIC_LOCK] Enforcing metric_tag='{config_metric}' from config (overriding TSPLIB)")
-            # Assert consistency
-            tsplib_metric = ins.get('edge_weight_type', 'UNKNOWN')
-            if tsplib_metric.upper() != config_metric.upper():
-                print(f"[METRIC_LOCK] WARNING: TSPLIB says '{tsplib_metric}' but config enforces '{config_metric}'")
+            enforced = str(config_metric).upper()
+            if enforced in ("EUC", "EUC2D"):
+                enforced = "EUC_2D"
+            elif enforced == "GEO_2D":
+                enforced = "GEO"
 
-            # Force rebuild distance function using config metric
-            from .distance import Distance
-            dist = Distance(config_metric, coords)
-            # ===== ADAPTIVE ANALYSIS =====
-            adaptive_enabled = self.cfg.get('adaptive', {}).get('enabled', False)
+            print(f"[METRIC_LOCK] Enforcing metric_tag='{enforced}' from config (overriding TSPLIB)")
+            if tsplib_metric != enforced:
+                print(f"[METRIC_LOCK] WARNING: TSPLIB says '{tsplib_metric}' but config enforces '{enforced}'")
 
-            if adaptive_enabled:
-                from bee_tsp.adaptive import (
-                    analyze_instance_structure,
-                    adaptive_delta_phi_config,
-                    size_adaptive_params
-                )
-                
-                n = ins['n']
-                
-                print("[ADAPTIVE] Analyzing instance structure...")
-                
-                # Analyze instance structure
-                structure_metrics = analyze_instance_structure(coords, dist, n)
-                
-                # Get adaptive ΔΦ config
-                adaptive_dphi_cfg = adaptive_delta_phi_config(structure_metrics)
-                
-                # Get size-adaptive params
-                adaptive_size_cfg = size_adaptive_params(n)
-                
-                # Override config with adaptive values
-                if 'delta_phi' not in self.cfg:
-                    self.cfg['delta_phi'] = {}
-                self.cfg['delta_phi'].update(adaptive_dphi_cfg)
-                
-                # Override candidate k
-                if 'candidate' not in self.cfg:
-                    self.cfg['candidate'] = {}
-                self.cfg['candidate']['k'] = adaptive_size_cfg['candidate_k']
-                
-                print(f"[ADAPTIVE] Applied strategy: {adaptive_dphi_cfg['strategy']}")
-            # ===== END ADAPTIVE =====
-            ins["dist"] = dist
-            ins["edge_weight_type"] = config_metric
-            metric_tag = config_metric
+            metric_tag = enforced
         else:
-            # Fallback: use TSPLIB metric
-            metric_tag = ins.get('edge_weight_type', 'UNKNOWN')
-            print(f"[METRIC_LOCK] Using TSPLIB metric_tag='{metric_tag}' (no override from config)")
+            metric_tag = tsplib_metric
+
+        # Keep the legacy name if the rest of the code expects it.
+        metric_name = metric_tag
+
+        # Persist for downstream parity checks.
+        self.cfg.setdefault("metric", {})["edge_weight_type"] = metric_tag
+        # -----------------------------------------------
+
+        # ===== ADAPTIVE ANALYSIS =====
+        adaptive_enabled = bool(self.cfg.get('adaptive', {}).get('enabled', False))
+
+        if adaptive_enabled:
+            if _HAS_ADAPTIVE:
+                try:
+                    from bee_tsp.adaptive import (
+                        analyze_instance_structure,
+                        adaptive_delta_phi_config,
+                        size_adaptive_params,
+                    )
+
+                    print("[ADAPTIVE] Analyzing instance structure...")
+                    # coords, dist, n must already be defined
+                    structure_metrics = analyze_instance_structure(coords, dist, n)
+
+                    # Derive configs (each may return None)
+                    adaptive_dphi_cfg = adaptive_delta_phi_config(structure_metrics) or {}
+                    adaptive_size_cfg = size_adaptive_params(n) or {}
+
+                    # Merge into solver config (non-destructive)
+                    self.cfg.setdefault('delta_phi', {}).update(adaptive_dphi_cfg)
+                    self.cfg.setdefault('adaptive_size', {}).update(adaptive_size_cfg)
+
+                except Exception as e:
+                    print(f"[ADAPTIVE] disabled (error: {e})")
+            else:
+                print("[ADAPTIVE] WARNING: adaptive module unavailable; skipping")
+        # ===== END ADAPTIVE =====
 
         # Record metric tag for parity checking
         self.cfg.setdefault("metric", {})["edge_weight_type"] = metric_tag
@@ -449,10 +489,10 @@ class BeeTSPSolver:
         use_or_opt = bool(self.cfg['local_search'].get('use_or_opt', False))
         agent_time = float(self.cfg['bees'].get('time_budget_s', 0.6))
         
-        # 3-opt on stall configuration
-        stall_windows_threshold = int(self.cfg.get('local_search', {}).get('stall_windows', 2))
-        three_opt_lite = bool(self.cfg.get('local_search', {}).get('three_opt_lite', False))
-        tri_budget = int(self.cfg.get('local_search', {}).get('tri_budget', 1500))
+        # 3-opt on stall configuration (currently not used)
+        _stall_windows_threshold = int(self.cfg.get('local_search', {}).get('stall_windows', 2))
+        _three_opt_lite = bool(self.cfg.get('local_search', {}).get('three_opt_lite', False))
+        _tri_budget = int(self.cfg.get('local_search', {}).get('tri_budget', 1500))
         
         # Integrator configuration
         integrator_cfg = self.cfg.get('integrator', {})
@@ -503,21 +543,30 @@ class BeeTSPSolver:
                 candidate_adj, delta_phi_dict, n, dist, delta_phi_config
             )
 
-        # Compute S·S·T features if available and coords exist
-        features_info = None
-        if _HAS_FEATURES and coords is not None:
-            try:
-                feat_cfg = self.cfg.get("solver", {}).get("features", {})
-                features_info = compute_features(
-                    np.array(coords), 
-                    kd_backend=feat_cfg.get("kd_backend", "auto"),
-                    max_threads=feat_cfg.get("max_threads_per_lib", 1)
+        # ==== FEATURES (read-only; guarded) ==========================================
+        feats = None
+        try:
+            feat_cfg = (self.cfg.get("features") or self.cfg.get("solver", {}).get("features") or {})
+            if _HAS_FEATURES and bool(feat_cfg.get("enabled", False)):
+                t0_ms = int(time.time() * 1000)
+                feats = _compute_features(
+                    coords,                               # pass raw coords; no NumPy required
+                    kd_backend     = feat_cfg.get("kd_backend", "auto"),
+                    max_threads    = int(feat_cfg.get("max_threads", 0) or 0),  # 0 = let lib decide
+                    metric         = metric_tag,          # you already defined this earlier
+                    time_budget_ms = int(feat_cfg.get("time_budget_ms", 400)),
+                    seed           = int(seed),
                 )
-                print(f"S·S·T features computed using {features_info.get('kd_backend', 'unknown')} backend")
-            except Exception as e:
-                print(f"Warning: Feature computation failed: {e}")
-        
-        # Initialize EHM and tracking variables
+                if feat_cfg.get("log", True):
+                    dt_ms = int(time.time() * 1000) - t0_ms
+                    print(f"[FEATURES] ok in {dt_ms} ms · n={feats.get('n')} · nn_mean={feats.get('nn_mean')} · keys≈{sorted(list(feats.keys()))[:6]}")
+            else:
+                print("[FEATURES] skipped (disabled or unavailable)")
+        except Exception as _e:
+            print(f"[FEATURES] disabled (error: {type(_e).__name__}: {_e})")
+            feats = None
+        # ============================================================================
+        # ---- MAIN SOLVER LOOP ---- Initialize EHM and tracking variables
         ehm = EdgeHistogram(n)
         best_len = INF
         best_tour: List[int] = list(range(n))
@@ -527,7 +576,7 @@ class BeeTSPSolver:
         last_improve_t = time.time()
         restarts_done = 0
         
-        # Stall tracking for 3-opt on stall
+        # Stall tracking for 3-opt on stall - not currently in use
         stall_windows = 0
         last_length = INF
 
@@ -553,8 +602,8 @@ class BeeTSPSolver:
         initial_tours = build_initial_tours(n, dist, candidate_adj, K, total_budget, mix)
         initial_tours.sort(key=lambda x: x[1])
 
-        # Calculate best_length from initial tours
-        best_length = min(length for _, length in initial_tours)
+        # Calculate best_length from initial tours (canonical TSPLIB integer)
+        best_length = min(dist.tour_length(t) for t, _ in initial_tours)
 
         # Apply local search to initial tours and seed pool
         pool = []
@@ -652,7 +701,7 @@ class BeeTSPSolver:
                         best_length = min(best_length, integrated_length)
                 
                 elif integrator_method == 'ucr' and _HAS_UCR:
-                    integrated_tour = ucr_integrate(pool, dist, candidate_adj, ucr_config)
+                    integrated_tour = _ucr_integrate(pool, dist, candidate_adj, ucr_config)
                     integrated_length = dist.tour_length(integrated_tour)
                     if integrated_length <= best_length * 1.05:
                         pool.append(integrated_tour)
@@ -678,8 +727,12 @@ class BeeTSPSolver:
         except Exception as e:
             print(f"[METRIC_SENTINEL] WARNING: {e}")
 
-        return {"instance_name": instance_name, "best_length": float(best_len), "best_tour": best_tour, "anytime": anytime}
-    
-
-   
-
+        return {
+            "instance_name": instance_name,
+            "best_length": float(best_len),
+            "best_tour": best_tour,
+            "anytime": anytime,
+            "metric": metric_tag,          # if not already present
+            "seed": seed,                  # if not already present
+            "features": feats,             # <-- add this line
+        }

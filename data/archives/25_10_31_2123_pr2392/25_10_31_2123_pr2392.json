@@ -1,0 +1,28 @@
+{
+  "instance": "pr2392",
+  "timestamp": "2025-10-31T21:23:24.871641+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\pr2392.tsp",
+  "wall_time_s": 600,
+  "seed_results": [
+    {
+      "seed": 42,
+      "best_length": 459910.0,
+      "runtime": 602.6378190517426,
+      "anytime_count": 15,
+      "tour_path": "results\\25_10_31_2123_pr2392\\seed_42_best.tour",
+      "tour_sha256": "d2669b8d5acc84c1d854c34cca186dcc3eb09681906a75a0c8f921581f991749",
+      "metric": "EUC_2D"
+    },
+    {
+      "seed": 42,
+      "best_length": 459910,
+      "runtime": 602.6378190517426,
+      "anytime_count": 15
+    }
+  ],
+  "best_overall": 459910.0,
+  "worst_overall": 459910.0,
+  "avg_runtime": 602.6378190517426,
+  "total_seeds": 2
+}

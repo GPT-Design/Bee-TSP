@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-from email import parser
-import argparse, os, time, json, copy, sys
+from random import seed
+import argparse, time, copy, sys
 from pathlib import Path
 
 # Ensure project root is importable when running from scripts/
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+ROOT = Path(__file__).resolve().parents[1]  # project root (.. from scripts/)
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 try:
     import yaml
@@ -50,6 +50,7 @@ def run_instance(inst_name, tsp_path, solver_cfg, results_dir, seeds, wall_time,
     """Run instance with standardized output management."""
     # Use standardized output management
     output_mgr = StandardOutputManager(inst_name, results_dir)
+    run_dir = output_mgr.get_run_directory()
 
     # METRIC LOCK: Read EDGE_WEIGHT_TYPE from TSP file at startup (Update_24R fix)
     metric_tag = read_tsplib_metric(tsp_path)
@@ -78,27 +79,84 @@ def run_instance(inst_name, tsp_path, solver_cfg, results_dir, seeds, wall_time,
     seed_results = []
     
     for seed in seeds:
-        t0 = time.time()
+        output_mgr.set_seed(seed)
+        seed_t0 = time.time()
+
+        # Solve
         res = solver.solve(inst_name, str(tsp_path), seed=seed)
-        rt = time.time() - t0
+
+        # Pull out results from the solver
+        best_tour    = res.get("best_tour") or []
+        best_length  = int(res.get("best_length", 0))
+        anytime      = res.get("anytime") or []
+        rt           = time.time() - seed_t0   # elapsed_s for THIS seed
+
+        # Build run_data used by the output manager to deterministically emit the tour + hash
+        run_data = {
+            "instance":        inst_name,
+            "metric":          metric_tag,       # e.g. "EUC_2D"/"ATT"/"CEIL_2D"
+            "mode":            mode,             # e.g. "SH"
+            "seed":            int(seed),
+            "wall_s":          float(wall_time),
+            "elapsed_s":       float(rt),
+            "epochs_completed": 0,
+            "epoch_s":          0,
+            "best_tour":       best_tour,        # enables tour emission inside create_manifest_entry()
+            "best_length":     best_length,      # TSPLIB integer
+            "length_tsplib":   best_length,
+
+            # optional analytics (pass-through)
+            "parity":          0.0,
+            "ttt10_s":         None,
+            "ttt5_s":          None,
+            "early_slope":     None,
+            "improvements_per_min": (len(anytime) / rt * 60.0) if rt > 0 and anytime else None,
+            "hive_attrib":     {},
+            "init_mix":        None,
+            "candidate_caps":  None,
+            "hk":              None,
+        }
+
+        # --- FORCE-WRITE TOUR for THIS seed at the canonical path ---
+        try:
+            if best_tour:
+                # Ensure it's a plain list and compute n from it
+                bt_list = list(best_tour)
+                output_mgr.save_tour(bt_list, len(bt_list), tour_length=int(best_length), write_sha_sidecar=False)
+        except TypeError:
+            # If save_tour doesn't accept write_sha_sidecar, retry without it
+            bt_list = list(best_tour)
+            output_mgr.save_tour(bt_list, len(bt_list), tour_length=int(best_length))
+
+        # Manifest row: writes/ hashes THIS seed’s tour at the canonical path
+        manifest_entry = output_mgr.create_manifest_entry(run_data)
+        output_mgr.append_to_global_manifest(manifest_entry)
+
+        # Per-seed anytime log (write exactly once)
+        anytime_events = [{"event": "improve", "t": float(t), "best": float(b)} for t, b in anytime]
+        summary_event  = {"event": "summary", "seed": int(seed), "best": best_length, "runtime": rt}
+        log_path       = output_mgr.save_seed_log(seed, anytime_events + [summary_event])
+
+        print(f"[{inst_name}] seed={seed} best={best_length:.1f} time={rt:.1f}s  -> {log_path}")
+
+        # Accumulate for summary JSON
+        seed_results.append({
+            "seed": seed,
+            "best_length": best_length,
+            "runtime": rt,
+            "anytime_count": len(anytime),
+            "tour_path": manifest_entry.get("tour_path"),
+            "tour_sha256": manifest_entry.get("tour_sha256"),
+            "metric": metric_tag,
+        })
         
         # Save individual seed log using standardized format
         anytime_events = [{"event":"improve","t":float(t),"best":float(best)} 
                           for t, best in res.get("anytime", [])]
         summary_event = {"event":"summary","seed":int(seed),"best":float(res.get("best_length", 0.0)),"runtime":rt}
         all_events = anytime_events + [summary_event]
-        
         log_path = output_mgr.save_seed_log(seed, all_events)
-        
-        seed_results.append({
-            "seed": seed,
-            "best_length": res.get('best_length', 0.0),
-            "runtime": rt,
-            "anytime_count": len(res.get("anytime", []))
-        })
-        
-        print(f"[{inst_name}] seed={seed} best={res.get('best_length', 0.0):.1f} time={rt:.1f}s  -> {log_path}")
-    
+                      
     # Save summary results
     summary_data = {
         "instance": inst_name,
@@ -112,37 +170,6 @@ def run_instance(inst_name, tsp_path, solver_cfg, results_dir, seeds, wall_time,
     }
     
     results_path = output_mgr.save_results(summary_data)
-
-    # Append each seed result to global manifest
-    print(f"[{inst_name}] Writing {len(seed_results)} entries to global manifest...")
-    for seed_result in seed_results:
-        # Create run data for manifest entry
-        run_data = {
-            "instance": inst_name,
-            "metric": "tour_length",
-            "mode": mode,
-            "seed": seed_result["seed"],
-            "wall_s": wall_time,
-            "elapsed_s": seed_result["runtime"],
-            "epochs_completed": 0,  # Not tracked in current implementation
-            "epoch_s": 0,
-            "tour_path": None,  # Would need tour file path
-            "tour_sha256": None,
-            "length_tsplib": seed_result["best_length"],
-            "opt": 11849233.0 if inst_name == "pla33810" else None,  # Known optimal for pla33810
-            "best_known": 11849233.0 if inst_name == "pla33810" else None,
-            "parity": 0.0,
-            "ttt10_s": None,  # Time-to-target metrics not available
-            "ttt5_s": None,
-            "early_slope": None,
-            "improvements_per_min": None,
-            "hive_attrib": {},
-            "timestamp_utc": output_mgr.timestamp.isoformat()
-        }
-
-        # Create and append manifest entry
-        manifest_entry = output_mgr.create_manifest_entry(run_data)
-        output_mgr.append_to_global_manifest(manifest_entry)
 
     print(f"[{inst_name}] Manifest entries written to: {output_mgr.global_manifest_path}")
     print(f"[{inst_name}] Summary saved to: {results_path}")

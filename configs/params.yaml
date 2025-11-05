@@ -1,6 +1,6 @@
 solver:
   candidate:
-    k: 64
+    k: 32
     use_delaunay: true
     use_knn: true
     use_alpha_near: false
@@ -11,13 +11,13 @@ solver:
     method: "kmeans"
     overlap_pct: 0.10
     target_zone_size: 300
-    agents_per_zone: 6
+    agents_per_zone: 4
   bees:
     scout_fraction: 0.2
     stagnation_moves: 200
     levy_jump_prob: 0.50
     max_improving_moves: 80
-    time_budget_s: 1.5
+    time_budget_s: 4.0
   local_search:
     use_lk: false
     max_k: 3
@@ -28,6 +28,12 @@ solver:
       forbid_until_pct: 0.5
       intra_zone_until_pct: 0.8
       tau_gain: 3
+  features:
+    enabled: true
+    kd_backend: auto     # or "numpy"
+    max_threads: 0       # 0/None = let the lib decide
+    time_budget_ms: 400  # small, cheap probe
+    log: true            # print a one-line summary
   delta_phi:
     enabled: true
     lambda_trade: 0.1
@@ -39,23 +45,23 @@ solver:
   # INTEGRATOR CONFIGURATION
   # Use --integ flag to switch: python run_large3.py --integ eax
   integrator:
-    method: 'eax'  # Default method (can be overridden by CLI)
-    
-    # EAX-specific parameters
+  # EAX-specific parameters
+    method: 'eax'  # Default method (can be overridden by CLI)    
     eax:
-      parents_per_round: 4
-      offspring_per_round: 2
+      parents_per_round: 6
+      offspring_per_round: 3
       repair_time_ms: 300
-      max_ab_cycles: 10
-    
+      pair_budget_ms: 2500  #150 is default
+      max_ab_cycles: 20
+      strict_eax_naive_only: false
+       
     # POPMUSIC-specific parameters  
     popmusic:
       elitist_seed: true
-      merge_edge_cap_per_node: 8
+      merge_edge_cap_per_node: 12
       parents_per_round: 4
-      rounds: 3
-      repair_time_ms: 300
-  
+      rounds: 1
+      repair_time_ms: 200
   ehm:
     smoothing_eps: 0.02
     max_edges_per_node: 16

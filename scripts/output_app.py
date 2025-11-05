@@ -8,22 +8,36 @@ Includes global manifest, timezone support, and CI validation hooks.
 
 import os
 import json
-import yaml
-import hashlib
+from random import seed
+import threading
 import math
-from datetime import datetime
+from datetime import datetime, timezone as _dt_timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, TYPE_CHECKING
+from tools.tour_io import write_tsplib_tour, sha256_file, is_perm_0n
+# Python 3.9+ has zoneinfo; otherwise use backport (Windows often needs tzdata too)
+# Prefer stdlib zoneinfo; fall back to backport if available; else None
+from datetime import tzinfo as _dt_tzinfo, timezone as _dt_timezone
 try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    # Fallback for Python < 3.9
-    from backports.zoneinfo import ZoneInfo
-from threading import Lock
+    from zoneinfo import ZoneInfo as _ZoneInfo
+except Exception:
+    _ZoneInfo = None  # zoneinfo not available
 
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+# at top of scripts/output_app.py
+try:
+    from tools.tour_io import write_tsplib_tour, sha256_file, is_perm_0n
+except Exception:
+    write_tsplib_tour = None  # type: ignore
+    sha256_file = None        # type: ignore
+    is_perm_0n = None         # type: ignore
 
 # Global lock for manifest writes
-_manifest_lock = Lock()
+_manifest_lock = threading.Lock()
 
 class StandardOutputManager:
     """Manages standardized output paths and file operations for TSP solver results."""
@@ -40,10 +54,15 @@ class StandardOutputManager:
         """
         self.instance_name = self._clean_instance_name(instance_name)
         self.base_results_dir = Path(base_results_dir)
+        self.seed: Optional[int] = None 
         
         # Handle timezone per Update_20 specs
         self.timezone = self._get_output_timezone()
-        self.timestamp = custom_timestamp or datetime.now(self.timezone)
+        if custom_timestamp is not None:
+            self.timestamp = custom_timestamp
+        else:
+            self.timestamp = datetime.now(self.timezone) if self.timezone else datetime.now(_dt_timezone.utc)
+
         self.timestamp_str = self._format_timestamp()
         self.base_filename = f"{self.timestamp_str}_{self.instance_name}"
         
@@ -53,6 +72,15 @@ class StandardOutputManager:
         # Global manifest path
         self.global_manifest_path = self.base_results_dir / "manifest.jsonl"
     
+    def set_seed(self, seed: int) -> None:
+        """Declare the active seed for per-seed artifacts/logs."""
+        self.seed = int(seed)
+
+    def _require_seed(self) -> int:
+        if self.seed is None:
+            raise AttributeError("seed not set; call set_seed(seed) before per-seed outputs")
+        return self.seed
+
     def _clean_instance_name(self, name: str) -> str:
         """Clean instance name to remove .tsp extension and invalid characters."""
         if name.endswith('.tsp'):
@@ -63,18 +91,34 @@ class StandardOutputManager:
         name = name.replace(' ', '_').replace('-', '_')
         return name
     
-    def _get_output_timezone(self) -> ZoneInfo:
-        """Get output timezone per Update_20 specs: Australia/Adelaide default, OUTPUT_TZ override."""
-        tz_name = os.environ.get('OUTPUT_TZ', 'Australia/Adelaide')
+    def _get_output_timezone(self) -> Optional[_dt_tzinfo]:
+        """Update_20: pick output TZ (default Australia/Adelaide, override via OUTPUT_TZ)."""
+        tz_name = os.environ.get("OUTPUT_TZ", "Australia/Adelaide")
+        if _ZoneInfo is None:
+            return None
         try:
-            return ZoneInfo(tz_name)
+            return _ZoneInfo(tz_name)
         except Exception:
-            # Fallback to UTC if timezone not available
-            return ZoneInfo('UTC')
+            try:
+                return _ZoneInfo("UTC")
+            except Exception:
+                return None
     
     def _format_timestamp(self) -> str:
-        """Format timestamp as YY_M_DD_HHMM."""
-        return f"{self.timestamp.year % 100}_{self.timestamp.month}_{self.timestamp.day:02d}_{self.timestamp.hour:02d}{self.timestamp.minute:02d}"
+        """Format as YY_MM_DD_HHMM in the configured output timezone."""
+        dt = self.timestamp
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_dt_timezone.utc)
+
+        tz = self._get_output_timezone()
+        if tz is not None:
+            try:
+                dt = dt.astimezone(tz)
+            except Exception:
+                dt = dt.astimezone(_dt_timezone.utc)
+
+        # yy_mm_dd_hhmm (zero-pad month/day/hour/minute)
+        return f"{dt.year % 100:02d}_{dt.month:02d}_{dt.day:02d}_{dt.hour:02d}{dt.minute:02d}"
     
     def _ensure_directories(self):
         """Create necessary directory structure."""
@@ -108,29 +152,34 @@ class StandardOutputManager:
         
         raise RuntimeError(f"Too many filename collisions for {path}")
     
+    def get_jsonl_path(self) -> Path:
+        ts = self._format_timestamp()
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        seed = self._require_seed()
+        return self.run_dir / f"seed_{seed}_{ts}.jsonl"
+
     def get_tour_path(self) -> Path:
-        """Get standardized path for tour file (.tour)."""
-        filename = f"{self.base_filename}.tour"
-        path = self.run_dir / filename
-        return self._handle_collision(path)
-    
+        ts = self._format_timestamp()
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        seed = self._require_seed()
+        return self.run_dir / f"seed_{seed}_{ts}.tour"
+
     def get_results_path(self) -> Path:
-        """Get standardized path for results file (.json)."""
-        filename = f"{self.base_filename}.json"
-        path = self.run_dir / filename
-        return self._handle_collision(path)
-    
+        """Run summary (.json)."""
+        ts = self._format_timestamp()
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        return self.run_dir / f"{self.base_filename}_{ts}.json"
+
     def get_config_path(self) -> Path:
-        """Get standardized path for configuration file (.yaml)."""
-        filename = f"{self.base_filename}.yaml"
-        path = self.run_dir / filename
-        return self._handle_collision(path)
-    
+        """Config snapshot (.yaml)."""
+        ts = self._format_timestamp()
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        return self.run_dir / f"{self.base_filename}_{ts}.yaml"
+
     def get_log_path(self, seed: int) -> Path:
-        """Get path for individual seed log file (.jsonl)."""
-        filename = f"seed_{seed}.jsonl"
-        path = self.run_dir / filename
-        return path
+        ts = self._format_timestamp()
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        return self.run_dir / f"seed_{seed}_{ts}.jsonl"
     
     def get_run_directory(self) -> Path:
         """Get the run-specific directory path."""
@@ -163,19 +212,23 @@ class StandardOutputManager:
             json.dump(enhanced_data, f, indent=2, ensure_ascii=False)
         
         return results_path
+
+    # inside class StandardOutputManager
+    def _calculate_tour_sha256(self, tour_path: Path) -> str:
+        """Return SHA256 of the given file (streamed, 1 MiB chunks)."""
+        import hashlib
+        h = hashlib.sha256()
+        with open(tour_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
     
     def save_config(self, config_data: Dict[str, Any]) -> Path:
         """
-        Save configuration data to standardized YAML file.
-        
-        Args:
-            config_data: Dictionary containing solver configuration
-            
-        Returns:
-            Path to saved config file
+        Save configuration data. Prefer YAML; fall back to JSON if PyYAML unavailable.
         """
-        config_path = self.get_config_path()
-        
         # Add run metadata
         enhanced_config = {
             **config_data,
@@ -183,23 +236,23 @@ class StandardOutputManager:
                 "instance_name": self.instance_name,
                 "timestamp": self.timestamp.isoformat(),
                 "output_format_version": "1.0",
-                "run_directory": str(self.run_dir)
-            }
+                "run_directory": str(self.run_dir),
+            },
         }
-        
-        with open(config_path, 'w', encoding='utf-8') as f:
+
+        if yaml is None:
+            # Fallback: write JSON next to where YAML would be
+            json_path = self.get_config_path().with_suffix(".json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(enhanced_config, f, indent=2, ensure_ascii=False)
+            return json_path
+
+        # Preferred: YAML
+        config_path = self.get_config_path()
+        with open(config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(enhanced_config, f, sort_keys=False, default_flow_style=False)
-        
         return config_path
-    
-    def _calculate_tour_sha256(self, tour_path: Path) -> str:
-        """Calculate SHA256 hash of tour file."""
-        sha256_hash = hashlib.sha256()
-        with open(tour_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(chunk)
-        return sha256_hash.hexdigest()
-    
+
     def _validate_no_nans(self, data: Any, path: str = "") -> None:
         """Validate that data contains no NaNs or Infinities."""
         if isinstance(data, dict):
@@ -212,44 +265,37 @@ class StandardOutputManager:
             if math.isnan(data) or math.isinf(data):
                 raise ValueError(f"NaN/Infinity found at {path}: {data}")
     
-    def save_tour(self, tour: list, dimension: int, tour_length: Optional[int] = None) -> Path:
+    # replace your current save_tour with this
+    def save_tour(self, tour: list, dimension: int, tour_length: Optional[int] = None,
+                write_sha_sidecar: bool = False) -> Path:
         """
         Save tour in TSPLIB format to standardized .tour file.
-        
-        Args:
-            tour: List of city indices (0-based or 1-based)
-            dimension: Number of cities
-            tour_length: Optional tour length for verification
-            
-        Returns:
-            Path to saved tour file
+        If write_sha_sidecar=True, also writes seed_... .tour.sha256 next to it.
         """
         tour_path = self.get_tour_path()
-        
+
         with open(tour_path, 'w', encoding='utf-8') as f:
-            f.write(f"NAME: {self.instance_name}\n")
-            f.write("TYPE: TOUR\n")
-            f.write(f"DIMENSION: {dimension}\n")
+            f.write(f"NAME : {self.instance_name}\n")
+            f.write("TYPE : TOUR\n")
+            f.write(f"DIMENSION : {dimension}\n")
             if tour_length is not None:
-                f.write(f"TOUR_LENGTH: {tour_length}\n")
+                f.write(f"COMMENT : Bee-TSP Mark1; length={int(tour_length)}\n")
+            else:
+                f.write("COMMENT : Bee-TSP Mark1\n")
             f.write("TOUR_SECTION\n")
-            
-            # Convert to 1-based indexing if needed
+            # Write 1-based IDs (accepts either 0-based or 1-based input)
+            zero_based = (min(tour) == 0)
             for city in tour:
-                city_idx = city + 1 if min(tour) == 0 else city
-                f.write(f"{city_idx}\n")
-            
-            f.write("-1\n")
-            f.write("EOF\n")
-        
-        # Calculate and optionally save SHA256
-        tour_sha256 = self._calculate_tour_sha256(tour_path)
-        
-        # Save optional sidecar SHA file
-        sha_path = tour_path.with_suffix('.tour.sha256')
-        with open(sha_path, 'w') as f:
-            f.write(f"{tour_sha256}  {tour_path.name}\n")
-        
+                f.write(f"{(city + 1) if zero_based else city}\n")
+            f.write("-1\nEOF\n")
+
+        # Always compute hash for the manifest, but only write sidecar if asked
+        _sha = self._calculate_tour_sha256(tour_path)
+        if write_sha_sidecar:
+            sha_path = tour_path.with_suffix('.tour.sha256')
+            with open(sha_path, 'w', encoding='utf-8') as sf:
+                sf.write(f"{_sha}  {tour_path.name}\n")
+
         return tour_path
     
     def save_seed_log(self, seed: int, events: list) -> Path:
@@ -303,51 +349,89 @@ class StandardOutputManager:
     
     def create_manifest_entry(self, run_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create a manifest entry from run data following Update_20 schema.
-        
-        Args:
-            run_data: Dictionary containing all run information
-            
-        Returns:
-            Dictionary formatted for manifest.jsonl
+        Create a manifest entry (Update_20 schema) with deterministic, this-run-only
+        tour emission. It first looks for the canonical file for THIS seed/run and
+        uses it if present; otherwise it writes from the provided best_tour.
         """
-        tour_path = self.get_tour_path()
-        tour_sha256 = self._calculate_tour_sha256(tour_path) if tour_path.exists() else None
-        
-        # Create repo-relative path
+        # --- Robust UTC timestamp ---
         try:
-            repo_relative_tour = str(tour_path.relative_to(Path.cwd().resolve())) if tour_path.exists() else None
-        except ValueError:
-            # If path is not relative to cwd, use as-is
-            repo_relative_tour = str(tour_path) if tour_path.exists() else None
-        
+            ts_utc = self.timestamp.astimezone(_dt_timezone.utc).isoformat()
+        except Exception:
+            ts_utc = self.timestamp.replace(tzinfo=_dt_timezone.utc).isoformat()
+
+        # Ensure per-seed path (so get_tour_path() is correct)
+        self.set_seed(int(run_data.get("seed", 0)))
+        tpath = self.get_tour_path()  # Path
+
+        # Pull fields we’ll pass through
+        inst_name = run_data.get("instance", self.instance_name) or "<unknown>"
+        metric    = run_data.get("metric", "EUC_2D")
+
+        def _safe_int(x, default=None):
+            try:
+                return int(x)
+            except Exception:
+                return default
+
+        best_tour_0b = run_data.get("best_tour")
+        length_int   = _safe_int(run_data.get("best_length"))
+
+        tour_path_value: Optional[str] = None
+        tour_sha_value:  Optional[str] = None
+
+        try:
+            # 1) Prefer an existing file at the canonical path for THIS run
+            if tpath.exists() and tpath.is_file():
+                tour_path_value = str(tpath)
+                tour_sha_value  = self._calculate_tour_sha256(tpath)
+            # 2) Otherwise, try to write it from in-memory data
+            elif best_tour_0b and length_int is not None:
+                try:
+                    bt_list = list(best_tour_0b)  # handles numpy arrays too
+                except Exception:
+                    bt_list = None
+                if bt_list and len(bt_list) > 0:
+                    # Primary attempt: with kwarg
+                    try:
+                        written = self.save_tour(bt_list, len(bt_list),
+                                                tour_length=length_int,
+                                                write_sha_sidecar=False)
+                    except TypeError:
+                        # Fallback if signature doesn’t accept that kwarg
+                        written = self.save_tour(bt_list, len(bt_list),
+                                                tour_length=length_int)
+                    tour_path_value = str(written)
+                    tour_sha_value  = self._calculate_tour_sha256(written)
+        except Exception as e:
+            print(f"[MANIFEST] emission error: {e!r}")
+            tour_path_value = None
+            tour_sha_value  = None
+
         manifest_entry = {
-            "instance": run_data.get("instance", self.instance_name),
-            "metric": run_data.get("metric", "EUC_2D"),  # Default, should be provided
-            "mode": run_data.get("mode", "SH"),  # Default, should be provided
-            "seed": run_data.get("seed", 0),
-            "wall_s": int(run_data.get("wall_s", 0)),
+            "instance": inst_name,
+            "metric": metric,
+            "mode": str(run_data.get("mode", "SH")),
+            "seed": int(run_data.get("seed", 0)),
+            "wall_s": float(run_data.get("wall_s", 0)),
             "elapsed_s": float(run_data.get("elapsed_s", 0.0)),
             "epochs_completed": int(run_data.get("epochs_completed", 0)),
             "epoch_s": int(run_data.get("epoch_s", 0)),
-            "tour_path": repo_relative_tour,
-            "tour_sha256": tour_sha256,
-            "length_tsplib": int(run_data.get("length_tsplib", 0)),
-            "opt": run_data.get("opt", None),  # int or null
-            "best_known": run_data.get("best_known", None),  # int or null
-            "parity": run_data.get("parity", "OK"),
-            "ttt10_s": run_data.get("ttt10_s", None),  # int or null
-            "ttt5_s": run_data.get("ttt5_s", None),  # int or null
-            "early_slope": run_data.get("early_slope", None),  # float or null
-            "improvements_per_min": run_data.get("improvements_per_min", None),  # float or null
-            "hive_attrib": run_data.get("hive_attrib", None),  # string or null
-            "timestamp_utc": self.timestamp.astimezone(ZoneInfo('UTC')).isoformat(),
-            # Update_23: Additional telemetry fields
-            "init_mix": run_data.get("init_mix", None),  # dict or null: {K: int, winner: str}
-            "candidate_caps": run_data.get("candidate_caps", None),  # dict or null: {cap: int, portals: int}
-            "hk": run_data.get("hk", None)  # dict or null: {enabled: bool}
+            "tour_path": tour_path_value,
+            "tour_sha256": tour_sha_value,
+            "length_tsplib": _safe_int(run_data.get("length_tsplib"), 0),
+            "opt": run_data.get("opt", None),
+            "best_known": run_data.get("best_known", None),
+            "parity": float(run_data.get("parity", 0.0)),
+            "ttt10_s": run_data.get("ttt10_s", None),
+            "ttt5_s": run_data.get("ttt5_s", None),
+            "early_slope": run_data.get("early_slope", None),
+            "improvements_per_min": run_data.get("improvements_per_min", None),
+            "hive_attrib": run_data.get("hive_attrib", None),
+            "timestamp_utc": ts_utc,
+            "init_mix": run_data.get("init_mix", None),
+            "candidate_caps": run_data.get("candidate_caps", None),
+            "hk": run_data.get("hk", None),
         }
-        
         return manifest_entry
     
     def get_summary_info(self) -> Dict[str, Any]:

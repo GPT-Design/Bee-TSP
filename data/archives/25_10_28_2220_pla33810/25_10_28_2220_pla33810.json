@@ -1,0 +1,28 @@
+{
+  "instance": "pla33810",
+  "timestamp": "2025-10-28T22:20:20.277152+10:30",
+  "output_format_version": "2.0",
+  "instance_path": "data\\tsplib\\pla33810.tsp",
+  "wall_time_s": 180,
+  "seed_results": [
+    {
+      "seed": 999,
+      "best_length": 82026464.0,
+      "runtime": 187.2893738746643,
+      "anytime_count": 1,
+      "tour_path": "results\\25_10_28_2220_pla33810\\seed_999_best.tour",
+      "tour_sha256": "4a024dcec84f2a1f0724543fe92aafee6dc0d36a963a855f091fd95376b19453",
+      "metric": "CEIL_2D"
+    },
+    {
+      "seed": 999,
+      "best_length": 82026464.0,
+      "runtime": 187.29037189483643,
+      "anytime_count": 1
+    }
+  ],
+  "best_overall": 82026464.0,
+  "worst_overall": 82026464.0,
+  "avg_runtime": 187.28987288475037,
+  "total_seeds": 2
+}

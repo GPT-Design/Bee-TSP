@@ -1,151 +1,122 @@
 """
-Full Edge Assembly Crossover (EAX) - Robust Implementation
-- Strict invariants (degree-2, permutation)
-- Safe E-set reconstruction (no singletons fabricated)
-- Proper multi-cycle patching via 2-edge bridges
-- Offspring sanity checks + length smell test + sane fallback
-
-Public entrypoint: eax_integrate(pool, dist, candidate_adj, config)
+Full Edge Assembly Crossover (EAX) - Safe, bounded Mark-1 implementation
+- Strict AB-cycle validation (alternation, closure, parent-membership, continuity)
+- Vertex-disjoint cycle selection (prevents parity breakage)
+- Robust E-set toggling against P1 edge set only
+- Degree==2 enforcement before converting E-set to a tour
+- Safe E-set → tour (components merged) + guarded 2-opt repair
+- Memory and time caps to avoid blow-ups on large instances (e.g., pr2392, pla33810)
 """
 
 from __future__ import annotations
-import math
-import random
-import time
-from typing import List, Dict, Set, Tuple, Iterable
-from collections import defaultdict, deque
-
+import random, time
+from collections import defaultdict, Counter
+from typing import List, Dict, Set, Tuple
 
 # =========================
-#         GUARDRAILS
-# =========================
-
-class TSPGuard:
-    """Cheap, strong checks to prevent returning garbage tours."""
-    def __init__(self, dist, n: int, instance_tag: str = ""):
-        self.dist = dist
-        self.n = n
-        self.instance_tag = instance_tag or getattr(dist, "name", "")
-        self._baseline_len = None  # computed lazily
-
-    def validate_permutation(self, tour: List[int], label: str = "tour") -> None:
-        if not tour or len(tour) != self.n:
-            raise AssertionError(f"[{label}] bad length: {len(tour) if tour else 0} != {self.n}")
-        if len(set(tour)) != self.n:
-            raise AssertionError(f"[{label}] duplicate/missing cities")
-        lo, hi = min(tour), max(tour)
-        if lo < 0 or hi >= self.n:
-            raise AssertionError(f"[{label}] city id out of range: [{lo},{hi}] vs [0,{self.n-1}]")
-
-    def length(self, tour: List[int]) -> float:
-        n = len(tour)
-        total = 0.0
-        for i in range(n):
-            a, b = tour[i], tour[(i + 1) % n]
-            d = self.dist.d(a, b)
-            if not math.isfinite(d) or d < 0:
-                raise AssertionError(f"[LEN] nonfinite/neg distance d({a},{b})={d}")
-            total += d
-        return total
-
-    def smell_test(self, L: float) -> None:
-        """Flag absurd blowups (wrong metric, broken splice, etc.)."""
-        if self._baseline_len is None:
-            # Identity tour as crude baseline (exercises dist)
-            baseline = list(range(self.n))
-            self._baseline_len = max(1.0, self.length(baseline))
-        # Allow slack; >20× baseline is almost surely nonsense.
-        if L > 20.0 * self._baseline_len:
-            raise AssertionError(
-                f"[SANITY] length {L:.3g} too large vs baseline {self._baseline_len:.3g}"
-            )
-
-
-# =========================
-#         API
+# Public API
 # =========================
 
 def eax_integrate(
     pool: List[List[int]],
     dist,
     candidate_adj: Dict[int, List[int]],
-    config: Dict,
+    config: Dict
 ) -> List[int]:
     """
-    EAX integration with robust invariants and safe fallbacks.
-    - pool: list of parent tours (permutations of 0..n-1)
-    - dist: object exposing d(i,j) -> nonnegative distance
-    - candidate_adj: node -> list of candidate neighbor nodes (for 2-opt restriction)
-    - config: dict with keys:
-        parents_per_round (int, default 4)
-        offspring_per_round (int, default 2)
-        repair_time_ms (int, default 200)
-        max_ab_cycles (int, default 10)
+    Integrate a pool using EAX and return the best offspring (or best parent on failure).
     """
     print(f"[EAX_ENTRY] Starting with {len(pool)} tours")
     if not pool or len(pool) < 2:
-        return pool[0][:] if pool else list(range(100))
+        return pool[0][:] if pool else []
 
     n = len(pool[0])
-    guard = TSPGuard(dist, n, instance_tag=getattr(dist, "name", ""))
 
-    # Config
-    top_k = int(config.get("parents_per_round", 4))
-    num_offspring = int(config.get("offspring_per_round", 2))
-    repair_time_ms = int(config.get("repair_time_ms", 200))
-    max_cycles_to_try = int(config.get("max_ab_cycles", 10))
+    # Config (conservative Mark-1 defaults)
+    top_k          = int(config.get("parents_per_round", 4))
+    num_offspring  = int(config.get("offspring_per_round", config.get("num_offspring", 3)))
+    repair_time_ms = int(config.get("repair_time_ms", 300))
+    max_ab_cycles  = int(config.get("max_ab_cycles", 10))
 
-    # Validate & sort parents
-    sane_parents: List[Tuple[float, List[int]]] = []
-    for idx, p in enumerate(pool):
-        try:
-            guard.validate_permutation(p, f"parent[{idx}]")
-            L = guard.length(p)
-            guard.smell_test(L)  # also exercises metric
-            sane_parents.append((L, p))
-        except AssertionError as e:
-            # Skip broken parent
-            print(f"[EAX] Dropping invalid parent[{idx}]: {e}")
+    # sort parents by length
+    ranked  = sorted(pool, key=lambda t: tour_length(t, dist))
+    parents = ranked[:max(2, min(top_k, len(ranked)))]
 
-    if len(sane_parents) < 2:
-        # If everything is broken, fail loudly
-        raise AssertionError("[EAX] Not enough sane parents to proceed")
-
-    sane_parents.sort(key=lambda t: t[0])
-    parents = [p for _, p in sane_parents[:max(2, top_k)]]
-
-    # Generate offspring
-    best_offspring = None
-    best_len = float("inf")
-
-    for _ in range(num_offspring):
+    # run multiple offspring attempts
+    best_child, best_len = None, float("inf")
+    for _ in range(max(1, num_offspring)):
         p1, p2 = random.sample(parents, 2)
         child = eax_full_recombine(
-            p1, p2, dist, candidate_adj, repair_time_ms, max_cycles_to_try
+            p1, p2, dist, candidate_adj,
+            repair_time_ms=repair_time_ms,
+            max_cycles=max_ab_cycles
         )
-
-        try:
-            guard.validate_permutation(child, "offspring")
-            Lc = guard.length(child)
-            guard.smell_test(Lc)
-        except AssertionError as e:
-            print(f"[EAX] Offspring rejected: {e}")
+        if not validate_tour(child, n):
             continue
+        L = dist.tour_length(child)
+        if L < best_len:
+            best_len, best_child = L, child
 
-        if Lc < best_len:
-            best_len, best_offspring = Lc, child
-
-    if best_offspring is not None:
-        return best_offspring
-
-    # Fallback: return best sane parent if no acceptable child
-    print("[EAX] No valid offspring; returning best sane parent")
-    return parents[0][:]
+    # acceptance / fallback
+    if best_child is None:
+        # No valid child this round → choose the best available parents deterministically
+        p_sorted = sorted(parents, key=lambda t: dist.tour_length(t))
+        pA = p_sorted[0]
+        pB = p_sorted[1] if len(p_sorted) > 1 else p_sorted[0]
+        return _fallback_polish_best_parent(pA, pB, dist, candidate_adj, repair_time_ms)
 
 
-# =========================
-#     EAX CORE LOGIC
-# =========================
+    # otherwise return the best valid child
+    return best_child
+
+def _fallback_polish_best_parent(
+    p1: List[int],
+    p2: List[int],
+    dist,
+    candidate_adj: Dict[int, List[int]],
+    repair_time_ms: int
+) -> List[int]:
+    """
+    When cycles are scarce/invalid, do something productive:
+    take the better parent and give it a quick polish.
+    Prefer a single POPMUSIC pass if available; else 2-opt.
+    """
+    best_par = p1 if tour_length(p1, dist) <= tour_length(p2, dist) else p2
+    best_len = tour_length(best_par, dist)
+
+    # Try POPMUSIC if available
+    try:
+        from bee_tsp.integrators.popmusic import popmusic_integrate
+        print("[EAX→POP] No usable EAX cycles; polishing best parent with POPMUSIC (1 round)")
+        cfg = {
+            "parents_per_round": 2,
+            "merge_edge_cap_per_node": 6,
+            "rounds": 1,
+            "repair_time_ms": max(200, min(400, repair_time_ms)),
+        }
+        child = popmusic_integrate([best_par], dist, candidate_adj, cfg)
+        if validate_tour(child, len(best_par)):
+            child_len = tour_length(child, dist)
+            if child_len < best_len:
+                print(f"[EAX→POP] POPMUSIC improved: {int(best_len)} → {int(child_len)}")
+                return child
+            else:
+                print("[EAX→POP] POPMUSIC made no improvement")
+    except Exception as e:
+        # POPMUSIC unavailable or failed; continue to 2-opt
+        print(f"[EAX→POP] POPMUSIC unavailable/failed ({type(e).__name__}): {e}")
+
+    # Minimal local polish (2-opt) fallback
+    print("[EAX→2OPT] Using 2-opt fallback polish")
+    child2 = repair_tour_2opt(best_par, dist, candidate_adj, repair_time_ms)
+    if validate_tour(child2, len(best_par)):
+        child2_len = tour_length(child2, dist)
+        if child2_len < best_len:
+            print(f"[EAX→2OPT] Improved: {int(best_len)} → {int(child2_len)}")
+            return child2
+
+    # No improvement
+    return best_par
 
 def eax_full_recombine(
     parent1: List[int],
@@ -156,238 +127,407 @@ def eax_full_recombine(
     max_cycles: int
 ) -> List[int]:
     """
-    Full EAX with AB-cycle detection and E-set manipulation.
-    Uses capped, de-duplicated AB-cycle enumeration to avoid RAM blow-ups.
-    Enforces full coverage (deg==2 for every node) before reconstruction.
+    Safe EAX with budgeted enumeration, vertex-disjoint selection,
+    and a POPMUSIC/2-opt fallback when cycles are scarce or invalid.
     """
+    import time
+
     n = len(parent1)
 
-    # Step 1: Build union graph adjacency
-    union_adj = build_union_graph(parent1, parent2)
+    # --- per-pair guard so big-n can't stall here
+    pair_t0 = time.time() * 1000.0
+    pair_budget_ms = 2500  # local guard; keep modest
 
-    # Step 2: Find up to 'max_cycles' unique AB-cycles (streamed)
-    print("[EAX] Enumerating AB-cycles…")
-    ab_cycles = find_ab_cycles(union_adj, n, cap=max_cycles)
-    if not ab_cycles:
-        # No cycles found - parents too similar, return better parent
-        len1 = tour_length(parent1, dist)
-        len2 = tour_length(parent2, dist)
-        print("[EAX] No AB-cycles; returning better parent.")
-        return parent1[:] if len1 <= len2 else parent2[:]
-    avg_len = sum(len(c) for c in ab_cycles) / max(1, len(ab_cycles))
-    print(f"[EAX] AB-cycles: kept={len(ab_cycles)} (cap={max_cycles}), avg_len≈{avg_len:.1f}")
+    # --- 1) Enumerate AB-cycles (bounded)
+    ab_cycles = enumerate_ab_cycles(
+        parent1, parent2, n,
+        cap_report=10_000,
+        log_cap=20,
+        time_budget_ms=3000
+    )
+    if (not ab_cycles) or ((time.time() * 1000.0 - pair_t0) > pair_budget_ms):
+        return _fallback_polish_best_parent(parent1, parent2, dist, candidate_adj, repair_time_ms)
 
-    # Step 3: Try different cycle combinations
-    best_tour = None
-    best_length = float('inf')
+    # --- 2) Sanitize + keep only vertex-disjoint cycles
+    ab_cycles = _sanitize_ab_cycles(ab_cycles, parent1, parent2, n, max_len=2048)
+    if (not ab_cycles) or ((time.time() * 1000.0 - pair_t0) > pair_budget_ms):
+        return _fallback_polish_best_parent(parent1, parent2, dist, candidate_adj, repair_time_ms)
 
-    # Try up to min(len(ab_cycles), max_cycles) random subsets
-    num_attempts = min(len(ab_cycles), max_cycles)
+    selected_cycles = _filter_vertex_disjoint_cycles(ab_cycles, n, max_cycles)
+    if (not selected_cycles) or ((time.time() * 1000.0 - pair_t0) > pair_budget_ms):
+        print(f"[EAX] No usable cycles; POPMUSIC polish (selected=0)")
+        return _fallback_polish_best_parent(parent1, parent2, dist, candidate_adj, repair_time_ms)
 
-    # Parent bound for mild pruning
-    p1_len = tour_length(parent1, dist)
-    p2_len = tour_length(parent2, dist)
-    parent_ub = 2.0 * max(p1_len, p2_len) + 1000.0
+    # --- helper: greedy E-set builder starting from P1 (degree-safe)
+    def _build_eset_greedy_from_p1(parent1_tour, cycles_labeled, n_nodes, cap):
+        def norm(a, b): return (a, b) if a < b else (b, a)
+        # seed with P1
+        eset_g: set[tuple[int, int]] = set()
+        deg = [0] * n_nodes
+        for i in range(n_nodes):
+            u, v = parent1_tour[i], parent1_tour[(i + 1) % n_nodes]
+            e = norm(u, v)
+            if e not in eset_g:
+                eset_g.add(e)
+                deg[u] += 1
+                deg[v] += 1  # P1 is a tour → deg == 2 across vertices
 
-    for _ in range(num_attempts):
-        # Select random subset of cycles (1 to len(ab_cycles))
-        k = random.randint(1, len(ab_cycles))
-        selected_cycles = random.sample(ab_cycles, k)
+        chosen = 0
+        for cyc in selected_cycles:  # try in given order; upstream may have sorted
+            if chosen >= cap:
+                break
+            ok = True
+            add_edges: list[tuple[int, int]] = []
+            remove_edges: list[tuple[int, int]] = []
+            for (u, v, lab) in cyc:
+                e = norm(u, v)
+                if lab == 'p1':
+                    if e not in eset_g:
+                        ok = False; break
+                    remove_edges.append(e)
+                else:  # 'p2'
+                    add_edges.append(e)
+            if not ok:
+                continue
+            # degree feasibility
+            for (u, v) in remove_edges:
+                if deg[u] - 1 < 0 or deg[v] - 1 < 0:
+                    ok = False; break
+            if ok:
+                for (u, v) in add_edges:
+                    if deg[u] + 1 > 2 or deg[v] + 1 > 2:
+                        ok = False; break
+            if not ok:
+                continue
+            # apply
+            for (u, v) in remove_edges:
+                if (u, v) in eset_g:
+                    eset_g.discard((u, v))
+                    deg[u] -= 1; deg[v] -= 1
+                else:
+                    # Shouldn't happen if checks above passed
+                    ok = False; break
+            if not ok:
+                continue
+            for (u, v) in add_edges:
+                if u > v: u, v = v, u
+                if (u, v) not in eset_g:
+                    eset_g.add((u, v))
+                    deg[u] += 1; deg[v] += 1
+            chosen += 1
+        return eset_g
 
-        # Build E-set by applying selected cycles (XOR semantics)
-        e_set = apply_cycles_to_eset(parent1, selected_cycles)
-
-        # Degree-2 invariant on E-set: **every node must be degree 2**
+    # --- 3) Naive E-set (XOR) + strict degree-2; rescue if needed
+    try:
+        eset = apply_cycles_to_eset(parent1, parent2, selected_cycles)
+        assert_degree_two(eset, n, allow_zero=False)
+    except AssertionError:
+        # Greedy rescue
+        eset = _build_eset_greedy_from_p1(parent1, selected_cycles, n, max_cycles)
         try:
-            assert_degree_two(e_set, n, allow_zero=False)
-        except AssertionError as e:
-            print(f"[EAX] Skipping subset (E-set deg!=2): {str(e)[:120]}")
-            continue
+            assert_degree_two(eset, n, allow_zero=False)
+            print("[EAX] Greedy E-set rescue: 2-regular achieved.")
+        except AssertionError:
+            # Single-cycle salvage
+            print("[EAX] Greedy rescue empty; trying single-cycle fallback.")
+            eset = set()
+            for cyc in selected_cycles[:5]:
+                single = apply_cycles_to_eset(parent1, parent2, [cyc])
+                try:
+                    assert_degree_two(single, n, allow_zero=False)
+                    eset = single
+                    print("[EAX] Single-cycle rescue: 2-regular achieved.")
+                    break
+                except AssertionError:
+                    continue
+            if not eset:
+                print("[EAX] Unable to form 2-regular E-set; POPMUSIC fallback.")
+                return _fallback_polish_best_parent(parent1, parent2, dist, candidate_adj, repair_time_ms)
 
-        # Convert E-set to cycles, then merge if needed
-        cycles = ecycle_components(e_set, n)
-        if not cycles:
-            continue
-        if len(cycles) == 1:
-            offspring = cycles[0]
-        else:
-            offspring = merge_cycles_greedy(cycles, dist)
+    # --- 4) Build offspring from E-set + hard validity gate
+    offspring = eset_to_tour(eset, n, dist)
+    if not validate_tour(offspring, n):
+        print("[EAX] Invalid tour produced from E-set (perm check failed) → POPMUSIC fallback.")
+        return _fallback_polish_best_parent(parent1, parent2, dist, candidate_adj, repair_time_ms)
 
-        # Hard permutation check BEFORE 2-opt (avoid IndexError)
-        if not (len(offspring) == n and len(set(offspring)) == n and min(offspring) == 0 and max(offspring) == n-1):
-            print(f"[EAX] Skipping subset (offspring not a full permutation): "
-                  f"len={len(offspring)}, unique={len(set(offspring))}")
-            continue
+    # --- 5) Quick polish + re-validate (budgeted)
+    offspring = repair_tour_2opt(offspring, dist, candidate_adj, repair_time_ms)
+    if not validate_tour(offspring, n):
+        return _fallback_polish_best_parent(parent1, parent2, dist, candidate_adj, repair_time_ms)
 
-        # Repair with 2-opt
-        offspring = repair_tour_2opt(offspring, dist, candidate_adj, repair_time_ms)
-
-        # Evaluate
-        length = tour_length(offspring, dist)
-        if length < best_length:
-            best_length = length
-            best_tour = offspring
-
-        # Optional pruning
-        if best_length < parent_ub:
-            parent_ub = best_length
-
-    if best_tour is None:
-        print(f"[EAX_WARN] All offspring invalid/none improved; returning better parent")
-        return parent1[:] if p1_len <= p2_len else parent2[:]
-
-    return best_tour
+    # --- 6) Return better of offspring vs best parent
+    best_par = _best_parent(parent1, parent2, dist)
+    return offspring if dist.tour_length(offspring) <= dist.tour_length(best_par) else best_par
 
 # =========================
-#     AB-CYCLE FINDING
+# AB-cycle enumeration & validation
 # =========================
 
-def build_union_graph(parent1: List[int], parent2: List[int]) -> Dict[int, Dict[str, Set[int]]]:
-    """
-    Returns: {node: {'p1': {neighbors from P1}, 'p2': {neighbors from P2}}}
-    """
+def _build_parent_adj(parent: List[int]) -> Dict[int, Set[int]]:
+    n = len(parent)
+    adj = {i: set() for i in range(n)}
+    for i in range(n):
+        u, v = parent[i], parent[(i + 1) % n]
+        adj[u].add(v)
+        adj[v].add(u)
+    return adj
+
+def _edge_in(adj: Dict[int, Set[int]], u: int, v: int) -> bool:
+    return v in adj.get(u, ()) or u in adj.get(v, ())
+
+def _union_labelled(parent1: List[int], parent2: List[int]) -> Dict[int, Dict[str, Set[int]]]:
+    """Union adjacency with labels 'p1' and 'p2'."""
     n = len(parent1)
-    union = defaultdict(lambda: {'p1': set(), 'p2': set()})
-
+    U = {i: {'p1': set(), 'p2': set()} for i in range(n)}
     for i in range(n):
-        u, v = parent1[i], parent1[(i + 1) % n]
-        union[u]['p1'].add(v)
-        union[v]['p1'].add(u)
+        a, b = parent1[i], parent1[(i + 1) % n]
+        U[a]['p1'].add(b); U[b]['p1'].add(a)
     for i in range(n):
-        u, v = parent2[i], parent2[(i + 1) % n]
-        union[u]['p2'].add(v)
-        union[v]['p2'].add(u)
+        a, b = parent2[i], parent2[(i + 1) % n]
+        U[a]['p2'].add(b); U[b]['p2'].add(a)
+    return U
 
-    return union
-
-def _walk_alternating_cycle(
-    start: int,
-    nxt: int,
-    label: str,
-    union_adj: Dict[int, Dict[str, Set[int]]],
-) -> List[Tuple[int, int, str]]:
+def _canon_cycle_sig(cyc: List[Tuple[int,int,str]]) -> Tuple:
     """
-    Walk an alternating-labeled cycle starting from (start -> nxt) with edge 'label'.
-    Avoid immediate backtracking; prefer closing to 'start' when possible.
+    Canonical signature for cycle dedup (rotation + reversal invariance).
+    Represent as sequence of triples, pick lexicographically smallest rotation/orientation.
     """
-    cycle: List[Tuple[int, int, str]] = []
-    cur = start
-    prev = None
-    cur_label = label
+    if not cyc: return tuple()
+    seq = cyc[:]
+    # normalize undirected edge orientation (ordered endpoints)
+    seq = [(min(u,v), max(u,v), lab) for (u,v,lab) in seq]
+    # all rotations both directions
+    cand = []
+    m = len(seq)
+    for s in range(m):
+        cand.append(tuple(seq[s:]+seq[:s]))
+    rev = list(reversed(seq))
+    for s in range(m):
+        cand.append(tuple(rev[s:]+rev[:s]))
+    return min(cand)
 
-    # Local guard to avoid very long drifts
-    steps = 0
-    max_steps = 2 * len(union_adj) + 10
-
-    while steps <= max_steps:
-        steps += 1
-        cycle.append((cur, nxt, cur_label))
-        cur, prev = nxt, cur
-        next_label = 'p2' if cur_label == 'p1' else 'p1'
-
-        # Prefer not to immediately backtrack
-        candidates = [nb for nb in union_adj[cur][next_label] if nb != prev]
-        if not candidates:
-            # If forced, allow closing to start
-            if start in union_adj[cur][next_label] and prev != start:
-                candidates = [start]
-            else:
-                return []
-
-        # If we can close to start and we have ≥3 edges already, do so
-        if start in candidates and len(cycle) >= 3:
-            cycle.append((cur, start, next_label))
-            return cycle
-
-        # Otherwise take the first candidate deterministically
-        nxt = candidates[0]
-        cur_label = next_label
-
-    # Safety: bail on runaway walks
-    return []
-
-def find_ab_cycles(
-    union_adj: Dict[int, Dict[str, Set[int]]],
+def enumerate_ab_cycles(
+    parent1: List[int],
+    parent2: List[int],
     n: int,
-    cap: int
-) -> List[List[Tuple[int, int, str]]]:
+    cap_report: int = 10000,
+    log_cap: int = 20,
+    time_budget_ms: int = 3000  # hard cap to avoid stalls
+) -> List[List[Tuple[int,int,str]]]:
     """
-    Streamed, de-duplicated AB-cycle enumeration with a hard cap.
-    Returns up to 'cap' unique cycles (each as [(u,v,label), ...]).
+    Enumerate SIMPLE AB-cycles (no vertex revisits except closing to start).
+    Budgeted by raw-cycle cap and wall-clock time to prevent stalls.
     """
-    seen: Set[frozenset] = set()  # signatures for dedup
-    out: List[List[Tuple[int, int, str]]] = []
+    U = _union_labelled(parent1, parent2)
+    raw_cycles: List[List[Tuple[int,int,str]]] = []
+    seen_sigs: Set[Tuple] = set()
 
-    def signature(cycle: List[Tuple[int, int, str]]) -> frozenset:
-        # undirected edge with label
-        return frozenset(((min(u, v), max(u, v), lab) for (u, v, lab) in cycle))
+    per_node_start_cap = 12
+    max_depth = 4096
+    t0 = time.time() * 1000.0
 
-    total_found = 0
-    for start in range(n):
-        for first_label in ('p1', 'p2'):
-            # Iterate neighbors deterministically for stability
-            for nxt in sorted(union_adj[start][first_label]):
-                cyc = _walk_alternating_cycle(start, nxt, first_label, union_adj)
-                if cyc and len(cyc) >= 4:
-                    total_found += 1
-                    sig = signature(cyc)
-                    if sig not in seen:
-                        seen.add(sig)
-                        out.append(cyc)
-                        if len(out) >= cap:
-                            print(f"[EAX] AB-cycle cap reached: kept={len(out)}, seen_total≈{total_found}")
-                            return out
-    if total_found > len(out):
-        print(f"[EAX] AB-cycles enumerated: kept={len(out)} / raw≈{total_found} (dedup applied)")
-    return out
+    print("[EAX] Enumerating AB-cycles…")
+    for s in range(n):
+        if (time.time()*1000.0 - t0) >= time_budget_ms:
+            break
+        for first_parent in ('p1', 'p2'):
+            nbrs = list(U[s][first_parent])
+            random.shuffle(nbrs)
+            nbrs = nbrs[:per_node_start_cap]
+            for nb in nbrs:
+                cyc: List[Tuple[int,int,str]] = []
+                cur = s
+                next_parent = first_parent
+                depth = 0
+                used_vertices: Set[int] = {s}
+                while depth < max_depth:
+                    if (time.time()*1000.0 - t0) >= time_budget_ms:
+                        break
+                    depth += 1
+                    picked = None
+                    for v in U[cur][next_parent]:
+                        if v == s and len(cyc) >= 3:
+                            picked = v
+                            break
+                        if v not in used_vertices:
+                            picked = v
+                            break
+                    if picked is None:
+                        break
+
+                    cyc.append((cur, picked, next_parent))
+                    if picked == s and len(cyc) >= 4:
+                        sig = _canon_cycle_sig(cyc)
+                        if sig not in seen_sigs:
+                            seen_sigs.add(sig)
+                            raw_cycles.append(cyc[:])
+                            if len(raw_cycles) >= cap_report:
+                                kept = min(len(raw_cycles), log_cap)
+                                avg_len = sum(len(c) for c in raw_cycles[:kept]) / kept
+                                print(f"[EAX] AB-cycles enumerated: kept={kept} / raw≈{len(raw_cycles)} (dedup applied)")
+                                print(f"[EAX] AB-cycles: kept={kept} (cap={log_cap}), avg_len≈{avg_len:.1f}")
+                                return raw_cycles[:log_cap]
+                        break
+
+                    used_vertices.add(picked)
+                    cur = picked
+                    next_parent = 'p2' if next_parent == 'p1' else 'p1'
+
+    kept = min(len(raw_cycles), log_cap)
+    if len(raw_cycles) >= log_cap:
+        avg_len = sum(len(c) for c in raw_cycles[:kept]) / kept if kept else 0.0
+        print(f"[EAX] AB-cycles enumerated: kept={kept} / raw≈{len(raw_cycles)} (dedup applied)")
+        print(f"[EAX] AB-cycles: kept={kept} (cap={log_cap}), avg_len≈{avg_len:.1f}")
+    else:
+        print(f"[EAX] AB-cycles: kept={len(raw_cycles)} (cap={log_cap})")
+    return raw_cycles[:log_cap]
+
+def _validate_ab_cycle(
+    cyc: List[Tuple[int,int,str]],
+    p1_adj: Dict[int, Set[int]],
+    p2_adj: Dict[int, Set[int]],
+) -> bool:
+    """
+    Valid AB-cycle:
+      - len >= 4 and even
+      - labels strictly alternate globally
+      - each edge exists in its stated parent
+      - continuity: consecutive edges share exactly one endpoint
+      - closure: last edge touches first start vertex
+      - SIMPLE: each vertex used by the cycle has degree 2 in the cycle
+      - LABEL BALANCE per vertex: exactly one 'p1' and one 'p2' incidence
+    """
+    m = len(cyc)
+    if m < 4 or (m % 2) != 0:
+        return False
+
+    # global alternation
+    for i in range(1, m):
+        if cyc[i][2] == cyc[i-1][2]:
+            return False
+
+    deg_local: Dict[int, int] = defaultdict(int)
+    lbl_count: Dict[int, Counter] = defaultdict(Counter)
+
+    for i in range(m):
+        u, v, lab = cyc[i]
+        if lab == 'p1':
+            if not _edge_in(p1_adj, u, v): return False
+        else:
+            if not _edge_in(p2_adj, u, v): return False
+
+        # continuity
+        u2, v2, _ = cyc[(i + 1) % m]
+        shared = ((u == u2) + (u == v2) + (v == u2) + (v == v2))
+        if shared == 0:
+            return False
+
+        # local undirected degree + per-vertex label counts
+        deg_local[u] += 1; deg_local[v] += 1
+        lbl_count[u][lab] += 1; lbl_count[v][lab] += 1
+
+    # closure
+    s0 = cyc[0][0]
+    ul, vl, _ = cyc[-1]
+    if not (s0 == ul or s0 == vl):
+        return False
+
+    # simple: deg==2; label balance: one 'p1' and one 'p2' at each used vertex
+    for v, d in deg_local.items():
+        if d != 2:
+            return False
+        if not (lbl_count[v]['p1'] == 1 and lbl_count[v]['p2'] == 1):
+            return False
+
+    return True
+
+def _sanitize_ab_cycles(
+    ab_cycles: List[List[Tuple[int,int,str]]],
+    parent1: List[int],
+    parent2: List[int],
+    n: int,
+    max_len: int | None = None,
+) -> List[List[Tuple[int,int,str]]]:
+    """Trim very long cycles (keep alternation), drop invalid ones."""
+    p1_adj = _build_parent_adj(parent1)
+    p2_adj = _build_parent_adj(parent2)
+
+    cleaned = []
+    for cyc in ab_cycles:
+        c = cyc
+        if max_len is not None and len(c) > max_len:
+            want = max_len if (max_len % 2) == 0 else (max_len - 1)
+            if want >= 4:
+                c = c[:want]
+        if _validate_ab_cycle(c, p1_adj, p2_adj):
+            cleaned.append(c)
+    return cleaned
+
+def _filter_vertex_disjoint_cycles(
+    cycles: List[List[Tuple[int,int,str]]],
+    n: int,
+    max_pick: int
+) -> List[List[Tuple[int,int,str]]]:
+    """
+    Greedy pick of vertex-disjoint cycles to avoid parity clashes at vertices.
+    """
+    picked = []
+    used: Set[int] = set()
+    # sort longer first (usually more impactful)
+    cycles_sorted = sorted(cycles, key=lambda c: -len(c))
+    for cyc in cycles_sorted:
+        verts = set()
+        ok = True
+        for (u, v, _) in cyc:
+            if u in used or v in used:
+                ok = False; break
+            verts.add(u); verts.add(v)
+        if ok:
+            picked.append(cyc)
+            used |= verts
+            if len(picked) >= max_pick:
+                break
+    return picked
 
 # =========================
-#   E-SET → CYCLES/Tour
+# E-set construction and checks
 # =========================
 
 def apply_cycles_to_eset(
     parent1: List[int],
-    cycles: List[List[Tuple[int, int, str]]]
-) -> Set[Tuple[int, int]]:
+    parent2: List[int],
+    cycles: List[List[Tuple[int,int,str]]]
+) -> Set[Tuple[int,int]]:
     """
-    Apply selected AB-cycles to parent1 to create the E-set using XOR (toggle) semantics.
-
-    Start from all P1 edges in parent1.
-    For each edge (u,v,lab) in the selected cycles:
-      - Toggle the undirected edge (min(u,v), max(u,v)) in the E-set,
-        regardless of label. This implements the symmetric-difference effect
-        across multiple cycles and prevents degree-1 artifacts when cycles overlap.
+    Start from P1 edges; for each cycle edge:
+      - if labeled 'p1': remove that edge from the set
+      - if labeled 'p2': add that edge to the set
+    Using normalized undirected edges (min, max).
     """
     n = len(parent1)
+    def norm(a, b): return (a, b) if a < b else (b, a)
 
-    # Start with all P1 edges from parent1
-    eset: Set[Tuple[int, int]] = set()
+    eset: Set[Tuple[int,int]] = set()
+    # seed with P1
     for i in range(n):
-        u, v = parent1[i], parent1[(i + 1) % n]
-        if u > v:
-            u, v = v, u
-        eset.add((u, v))
+        u, v = parent1[i], parent1[(i+1) % n]
+        eset.add(norm(u, v))
 
-    # Toggle helper
-    def toggle(edge: Tuple[int, int]):
-        if edge in eset:
-            eset.remove(edge)
-        else:
-            eset.add(edge)
-
-    # For each selected cycle, toggle each edge
-    # (p1 edges: remove if present / re-add if encountered twice;
-    #  p2 edges: add if absent / remove if encountered twice)
-    for cycle in cycles:
-        for u, v, _lab in cycle:
-            a, b = (u, v) if u < v else (v, u)
-            toggle((a, b))
-
+    # toggle with cycles
+    for cyc in cycles:
+        for (u, v, lab) in cyc:
+            e = norm(u, v)
+            if lab == 'p1':
+                eset.discard(e)
+            else:  # 'p2'
+                eset.add(e)
     return eset
 
-def assert_degree_two(eset: Set[Tuple[int, int]], n: int, allow_zero: bool) -> None:
-    """Ensure each node has deg==2 (or deg in {0,2} if allow_zero)."""
-    deg = [0] * n
+def assert_degree_two(eset: Set[Tuple[int,int]], n: int, allow_zero: bool=False) -> None:
+    """
+    Verify each vertex has degree exactly 2 (or exactly 0 if allow_zero).
+    """
+    deg = [0]*n
     for u, v in eset:
         deg[u] += 1
         deg[v] += 1
@@ -402,171 +542,188 @@ def assert_degree_two(eset: Set[Tuple[int, int]], n: int, allow_zero: bool) -> N
     if bad:
         raise AssertionError(f"[E-SET] Degree violations (node,deg): {bad[:10]}... total={len(bad)}")
 
+def _can_add_cycle_safely(eset: set[tuple[int,int]], cyc_edges: list[tuple[int,int]], n: int) -> bool:
+    """Check if adding this cycle’s edges keeps all vertex degrees ≤ 2."""
+    deg = [0]*n
+    for u,v in eset:
+        deg[u]+=1; deg[v]+=1
+    for u,v in cyc_edges:
+        deg[u]+=1; deg[v]+=1
+        if deg[u] > 2 or deg[v] > 2:
+            return False
+    return True
 
-def ecycle_components(eset: Set[Tuple[int, int]], n: int) -> List[List[int]]:
+def _build_eset_greedy(cycles_edges: list[list[tuple[int,int]]], n: int, cap: int) -> set[tuple[int,int]]:
     """
-    Decompose E-set into disjoint cycles by adjacency walk.
-    No node fabrication; only nodes with deg==2 are in cycles.
+    Greedy degree-safe E-set: try cycles in order; add only if all degrees stay ≤ 2.
+    cycles_edges: each item is a list of undirected edges (u,v) with u!=v, u<v normalization preferred
     """
-    adj = defaultdict(list)
-    for u, v in eset:
-        adj[u].append(v)
-        adj[v].append(u)
+    eset: set[tuple[int,int]] = set()
+    chosen = 0
+    for cyc in cycles_edges:
+        if chosen >= cap:
+            break
+        if _can_add_cycle_safely(eset, cyc, n):
+            for e in cyc:
+                u,v = e
+                if u > v:  # normalize
+                    u,v = v,u
+                eset.add((u,v))
+            chosen += 1
+    return eset
 
-    visited = [False] * n
-    cycles: List[List[int]] = []
+def validate_tour(tour: List[int], n: int) -> bool:
+    return bool(tour) and len(tour)==n and min(tour)==0 and max(tour)==n-1 and len(set(tour))==n
 
-    for start in range(n):
-        if start not in adj or len(adj[start]) != 2 or visited[start]:
-            continue
-        # walk cycle
-        cyc = []
-        cur = start
+# =========================
+# E-set → tour
+# =========================
+
+def eset_to_tour(eset: Set[Tuple[int,int]], n: int, dist) -> List[int]:
+    """
+    Convert E-set to a Hamiltonian tour.
+    Precondition: degree==2 everywhere.
+    Strategy: build adjacency; walk one cycle; if multiple cycles (shouldn’t happen with deg==2),
+    connect components greedily.
+    """
+    if not eset:
+        return list(range(n))  # fallback
+
+    # adjacency
+    adj = [[] for _ in range(n)]
+    for a,b in eset:
+        adj[a].append(b)
+        adj[b].append(a)
+
+    # detect components (should be 1 with deg==2, but guard anyway)
+    seen = [False]*n
+    comps = []
+    for s in range(n):
+        if seen[s]: continue
+        if not adj[s]: continue
+        stack=[s]; seen[s]=True; comp=[s]
+        while stack:
+            u=stack.pop()
+            for v in adj[u]:
+                if not seen[v]:
+                    seen[v]=True; stack.append(v); comp.append(v)
+        comps.append(comp)
+
+    if not comps:
+        return list(range(n))
+
+    if len(comps)==1:
+        # walk the simple cycle
+        start = comps[0][0]
+        tour=[start]
         prev = None
+        cur = start
         while True:
-            cyc.append(cur)
-            visited[cur] = True
-            a, b = adj[cur]
-            nxt = a if a != prev else b
+            nbrs = adj[cur]
+            nxt = nbrs[0] if nbrs[0]!=prev else (nbrs[1] if len(nbrs)>1 else None)
+            if nxt is None:
+                break
+            if nxt == start and len(tour)==n:
+                return tour
+            tour.append(nxt)
             prev, cur = cur, nxt
-            if cur == start:
+            if len(tour) > n+5:  # paranoia
                 break
-        # Close check
-        if start not in adj[cyc[-1]]:
-            raise AssertionError("[E-CYCLE] cycle does not close")
-        cycles.append(cyc)
+        # fallback join if something odd
+        return _join_components_greedy([tour], dist, n)
 
-    # Optional sanity: ensure no leftover deg-2 nodes unvisited
-    for node in adj:
-        if len(adj[node]) == 2 and not visited[node]:
-            raise AssertionError(f"[E-CYCLE] missed deg-2 node {node}")
+    # multiple components (shouldn’t with deg==2), connect greedily
+    return _join_components_greedy(comps, dist, n)
 
-    return cycles
+def _join_components_greedy(comps: List[List[int]], dist, n: int) -> List[int]:
+    """Greedily connect component sequences by nearest endpoints."""
+    if not comps:
+        return list(range(n))
+    tour = comps[0][:]
+    for comp in comps[1:]:
+        # pick best insertion between ends (cheap heuristic)
+        best = None
+        for i in range(len(tour)):
+            a = tour[i]
+            b = tour[(i+1)%len(tour)]
+            for u in comp:
+                # try splice: a-u + u-b
+                gain = (dist.d(a,u) + dist.d(u,b)) - dist.d(a,b)
+                if (best is None) or (gain < best[0]):
+                    best = (gain, i, u)
+        _, i, u = best
+        tour = tour[:i+1] + [u] + tour[i+1:]
+        # append remaining nodes of comp naively next to u
+        rest = [x for x in comp if x != u]
+        tour = tour[:i+2] + rest + tour[i+2:]
+    # if duplicates happened (paranoia), dedupe sequentially then fill gaps
+    tour = _repair_perm_paranoid(tour, n)
+    return tour
 
-
-def merge_cycles_greedy(cycles: List[List[int]], dist) -> List[int]:
-    """
-    Merge multiple cycles into a single tour using 2-edge bridges
-    (reopen both cycles and reconnect crosswise with best gain).
-    """
-    if not cycles:
-        return []
-    if len(cycles) == 1:
-        return cycles[0][:]
-
-    # Copy and sort to encourage stable, short merges first
-    work = [c[:] for c in cycles]
-    work.sort(key=len)
-    A = work.pop(0)
-
-    def best_bridge(A: List[int], B: List[int]) -> Tuple[str, int, int, float]:
-        best_mode = "straight"
-        best_i = 0
-        best_j = 0
-        best_gain = math.inf
-        m, n = len(A), len(B)
-        for i in range(m):
-            a1, a2 = A[i], A[(i + 1) % m]
-            for j in range(n):
-                b1, b2 = B[j], B[(j + 1) % n]
-                d0 = dist.d(a1, a2) + dist.d(b1, b2)
-                d1 = dist.d(a1, b1) + dist.d(a2, b2)
-                d2 = dist.d(a1, b2) + dist.d(a2, b1)
-                g1 = d1 - d0
-                g2 = d2 - d0
-                if g1 < best_gain:
-                    best_gain, best_mode, best_i, best_j = g1, "straight", i, j
-                if g2 < best_gain:
-                    best_gain, best_mode, best_i, best_j = g2, "cross", i, j
-        return best_mode, best_i, best_j, best_gain
-
-    while work:
-        B = work.pop(0)
-        mode, i, j, _ = best_bridge(A, B)
-        # splice cycles A and B according to mode
-        if mode == "straight":
-            A1 = A[: i + 1]
-            A2 = A[i + 1 :]
-            B1 = B[: j + 1]
-            B2 = B[j + 1 :]
-            A = A1 + list(reversed(B1)) + A2 + B2
-        else:  # "cross"
-            A1 = A[: i + 1]
-            A2 = A[i + 1 :]
-            B1 = B[j + 1 :]
-            B2 = B[: j + 1]
-            A = A1 + B1 + A2 + list(reversed(B2))
-
-    return A
+def _repair_perm_paranoid(t: List[int], n: int) -> List[int]:
+    seen=set(); out=[]
+    for x in t:
+        if 0<=x<n and x not in seen:
+            out.append(x); seen.add(x)
+    # fill missing
+    for i in range(n):
+        if i not in seen: out.append(i)
+    return out[:n]
 
 # =========================
-#        LOCAL OPT
+# 2-opt repair (guarded)
 # =========================
 
-def repair_tour_2opt(
-    tour: List[int],
-    dist,
-    candidate_adj: Dict[int, List[int]],
-    time_budget_ms: int,
-) -> List[int]:
-    """Candidate-restricted, time-bounded 2-opt improvement."""
+def repair_tour_2opt(tour: List[int], dist, candidate_adj: Dict[int, List[int]], time_budget_ms: int) -> List[int]:
     if not tour or len(tour) < 4:
-        return tour[:]
+        return tour
+    t0 = time.time() * 1000.0
+    n  = len(tour)
+    tour = tour[:]
 
-    t = tour[:]
-    n = len(t)
-    pos = [0] * n
-    for i, city in enumerate(t):
-        pos[city] = i
+    pos = [0]*n
+    for i, c in enumerate(tour):
+        if not (0 <= c < n):
+            return tour
+        pos[c] = i
 
-    start_ms = time.time() * 1000
-    improved = True
-
-    while improved and (time.time() * 1000 - start_ms) < time_budget_ms:
-        improved = False
+    improved=True
+    while improved and (time.time()*1000.0 - t0) < time_budget_ms:
+        improved=False
         for i in range(n):
-            if (time.time() * 1000 - start_ms) >= time_budget_ms:
-                break
-
-            a = t[i]
-            b = t[(i + 1) % n]
-            cand = candidate_adj.get(a, [])[:8]  # slightly larger beam helps
-            for ck in cand:
-                k = pos[ck]
-                if k == i or k == (i + 1) % n or k == (i - 1) % n:
-                    continue
-                c = t[k]
-                d = t[(k + 1) % n]
-
-                old_cost = dist.d(a, b) + dist.d(c, d)
-                new_cost = dist.d(a, c) + dist.d(b, d)
-                delta = new_cost - old_cost
-
-                if delta < -1e-9:
+            if (time.time()*1000.0 - t0) >= time_budget_ms: break
+            a = tour[i]; b = tour[(i+1)%n]
+            cand = candidate_adj.get(a, ())
+            # small cap per iteration
+            for city_k in cand[:8]:
+                k = pos[city_k]
+                if k==i or k==(i+1)%n or k==(i-1)%n: continue
+                c = tour[k]; d = tour[(k+1)%n]
+                delta = (dist.d(a,c) + dist.d(b,d)) - (dist.d(a,b) + dist.d(c,d))
+                if delta < -1e-6:
                     if i < k:
-                        t[i + 1 : k + 1] = reversed(t[i + 1 : k + 1])
+                        tour[i+1:k+1] = reversed(tour[i+1:k+1])
                     else:
-                        t[k + 1 : i + 1] = reversed(t[k + 1 : i + 1])
-                    # rebuild positions quickly (O(n) but bounded by time budget)
-                    for idx, city in enumerate(t):
+                        tour[k+1:i+1] = reversed(tour[k+1:i+1])
+                    # rebuild pos only for affected segment (simple but safe: rebuild full)
+                    for idx, city in enumerate(tour):
                         pos[city] = idx
-                    improved = True
+                    improved=True
                     break
-            if improved:
-                break
-
-    return t
-
+            if improved: break
+    return tour
 
 # =========================
-#       UTILITIES
+# Utilities
 # =========================
 
 def tour_length(tour: List[int], dist) -> float:
-    if not tour:
-        return float("inf")
-    s = 0.0
+    if not tour: return float("inf")
     n = len(tour)
+    s = 0.0
     for i in range(n):
-        s += dist.d(tour[i], tour[(i + 1) % n])
+        s += dist.d(tour[i], tour[(i+1)%n])
     return s
+
+def _best_parent(p1, p2, dist):
+    return p1[:] if tour_length(p1, dist) <= tour_length(p2, dist) else p2[:]

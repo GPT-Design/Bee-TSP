@@ -1,7 +1,11 @@
 # === begin: popmusic_integrate (REPLACE THIS WHOLE FUNCTION) ===
 from typing import List, Dict, Tuple
 from collections import defaultdict
-import numpy as np
+# --- safe imports ---
+try:
+    import numpy as np
+except Exception as e:
+    raise RuntimeError("[POPMUSIC] numpy is required. Install with: pip install numpy") from e
 
 def popmusic_integrate(
     pool: List[List[int]],

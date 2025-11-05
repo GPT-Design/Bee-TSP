@@ -1,0 +1,70 @@
+\documentclass[11pt]{article}
+\usepackage{authblk}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\title{Bee-TSP (Mark-1): A Reproducible Baseline with Safe EAX and Deterministic Artifacts for TSPLIB}
+\author[1]{Your Name}
+\affil[1]{Affiliation}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+% 150–180 words (fill from the new chat)
+\end{abstract}
+
+\section{Introduction}
+% Problem framing, contribution list:
+% (1) Safe EAX with degree-regularity rescue + POPMUSIC/2-opt
+% (2) Metric-locked distance factory + EUC/CEIL sentinel
+% (3) Deterministic per-seed artifacts and manifest hashing
+% (4) Clean baseline results across 8 classic instances
+
+\section{Related Work}
+% Brief: EAX, POPMUSIC, 2/3-opt, TSPLIB practices, reproducible pipelines.
+
+\section{Methods}
+\subsection{Distance and Metric Lock}
+% EDGE\_WEIGHT\_TYPE mapping, EUC vs CEIL cross-check, ATT handling.
+
+\subsection{Population and Recombination}
+% Parent selection, AB-cycle enumeration (cap), vertex-disjoint selection, degree-safe rescue.
+
+\subsection{Local Repair}
+% POPMUSIC/2-opt; 3-opt-lite OFF unless noted; budgets.
+
+\subsection{Runtime Budget and Seeds}
+% Wall-time per instance; seeds; candidate k; EAX params.
+
+\subsection{Artifacts and Manifests}
+% Per-seed .jsonl; .tour (1-based); SHA256; manifest schema fields.
+
+\section{Experimental Setup}
+% Instances, seeds, wall-time; machine; Python/NumPy/SciPy versions.
+
+\section{Results}
+% Insert the reported table; add short analysis per instance.
+% [Figure 1: Anytime curves att48/kroA100]
+% [Figure 2: TTT@5\%/10\% histograms]
+% [Figure 3: Gap vs n plot including eil76/lin318/pr2392]
+
+\section{Ablations and Limitations}
+% k, max_ab_cycles, repair_ms knobs; eil76 stickiness; pr2392 scaling; 3-opt-lite OFF.
+
+\section{Conclusion}
+% What we achieved; what remains; what we release.
+
+\paragraph{Reproducibility Statement}
+% Directory layout + manifest policy; hashes; how to rerun.
+
+\appendix
+\section{Manifest Schema}
+% Key fields: instance, metric, seed, wall_s, elapsed_s, tour_path, tour_sha256, length_tsplib, timestamp_utc, etc.
+
+\section{Run Commands and Configs}
+% Example CLI and YAML snippets (k=64, max_ab_cycles=20, repair_time_ms=300).
+
+\end{document}

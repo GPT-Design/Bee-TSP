@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Results & analysis outputs
+results/
+!results/.keep   # (optional) keep the dir but not contents
+*.csv
+*.jsonl
+*.yaml
+*.tour.sha256
+
+# Data (keep code + small TSPLIB; ignore big raw dumps)
+data/raw/
